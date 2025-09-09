@@ -5,7 +5,9 @@ package service
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // Region represents a region in Indonesia with all its administrative divisions.
@@ -31,40 +33,126 @@ func New(db *sql.DB) *Service {
 	}
 }
 
+// SearchQuery represents the parameters for a search query.
+type SearchQuery struct {
+	Query       string
+	Subdistrict string
+	District    string
+	City        string
+	Province    string
+}
+
 // Search performs a general search across all regions based on the provided query.
-func (s *Service) Search(query string) ([]Region, error) {
-	if query == "" {
-		return nil, NewError(ErrCodeInvalidInput, "query parameter is required")
+func (s *Service) Search(searchQuery SearchQuery) ([]Region, error) {
+	// Check if any search criteria are provided
+	if searchQuery.Query == "" && searchQuery.Subdistrict == "" && searchQuery.District == "" && searchQuery.City == "" && searchQuery.Province == "" {
+		return nil, NewError(ErrCodeInvalidInput, "at least one search parameter is required")
 	}
 
-	slog.Info("Processing search request", "query", query)
+	slog.Info("Processing search request", "query", searchQuery)
 
-	// Prepare and execute the SQL query for Full-Text Search
-	sqlQuery := `
-		SELECT id, subdistrict, district, city, province, postal_code, full_text, score
-		FROM (
-			SELECT *, fts_main_regions.match_bm25(id, ?) AS score
-			FROM regions
-		)
-		WHERE score IS NOT NULL
-		ORDER BY score DESC
+	// If only the general query is provided, use the existing FTS
+	if searchQuery.Query != "" && searchQuery.Subdistrict == "" && searchQuery.District == "" && searchQuery.City == "" && searchQuery.Province == "" {
+		slog.Info("Performing full-text search", "query", searchQuery.Query)
+		sqlQuery := `
+			SELECT id, subdistrict, district, city, province, postal_code, full_text, score
+			FROM (
+				SELECT *, fts_main_regions.match_bm25(id, ?) AS score
+				FROM regions
+			)
+			WHERE score IS NOT NULL
+			ORDER BY score DESC
+			LIMIT 10;
+		`
+		rows, err := s.db.Query(sqlQuery, searchQuery.Query)
+		if err != nil {
+			slog.Error("Database query failed", "error", err, "query", searchQuery.Query)
+			return nil, NewErrorf(ErrCodeDatabaseFailure, "database query failed: %v", err)
+		}
+		defer rows.Close()
+
+		results, err := s.scanRegions(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		slog.Info("Search completed", "query", searchQuery.Query, "results", len(results))
+		return results, nil
+	}
+
+	// Build a dynamic query with Jaro-Winkler similarity for specific fields
+	var conditions []string
+	var scoreComponents []string
+	var args []interface{}
+
+	if searchQuery.Subdistrict != "" {
+		conditions = append(conditions, "jaro_winkler_similarity(subdistrict, ?) >= 0.8")
+		scoreComponents = append(scoreComponents, "jaro_winkler_similarity(subdistrict, ?)")
+		args = append(args, searchQuery.Subdistrict)
+	}
+	if searchQuery.District != "" {
+		conditions = append(conditions, "jaro_winkler_similarity(district, ?) >= 0.8")
+		scoreComponents = append(scoreComponents, "jaro_winkler_similarity(district, ?)")
+		args = append(args, searchQuery.District)
+	}
+	if searchQuery.City != "" {
+		conditions = append(conditions, "(jaro_winkler_similarity(city, 'Kota ' || ?) >= 0.8 OR jaro_winkler_similarity(city, 'Kabupaten ' || ?) >= 0.8)")
+		scoreComponents = append(scoreComponents, "GREATEST(jaro_winkler_similarity(city, 'Kota ' || ?), jaro_winkler_similarity(city, 'Kabupaten ' || ?))")
+		args = append(args, searchQuery.City, searchQuery.City)
+	}
+	if searchQuery.Province != "" {
+		conditions = append(conditions, "jaro_winkler_similarity(province, ?) >= 0.8")
+		scoreComponents = append(scoreComponents, "jaro_winkler_similarity(province, ?)")
+		args = append(args, searchQuery.Province)
+	}
+	if searchQuery.Query != "" {
+		conditions = append(conditions, "fts_main_regions.match_bm25(id, ?) IS NOT NULL")
+		scoreComponents = append(scoreComponents, "fts_main_regions.match_bm25(id, ?)")
+		args = append(args, searchQuery.Query)
+	}
+
+	// Prepare arguments for ORDER BY clause
+	var orderByArgs []interface{}
+	if searchQuery.Subdistrict != "" {
+		orderByArgs = append(orderByArgs, searchQuery.Subdistrict)
+	}
+	if searchQuery.District != "" {
+		orderByArgs = append(orderByArgs, searchQuery.District)
+	}
+	if searchQuery.City != "" {
+		orderByArgs = append(orderByArgs, searchQuery.City, searchQuery.City)
+	}
+	if searchQuery.Province != "" {
+		orderByArgs = append(orderByArgs, searchQuery.Province)
+	}
+	if searchQuery.Query != "" {
+		orderByArgs = append(orderByArgs, searchQuery.Query)
+	}
+
+	finalArgs := append(args, orderByArgs...)
+
+	// Construct the final query
+	sqlQuery := fmt.Sprintf(`
+		SELECT id, subdistrict, district, city, province, postal_code, full_text
+		FROM regions
+		WHERE %s
+		ORDER BY (%s) DESC
 		LIMIT 10;
-	`
+	`, strings.Join(conditions, " AND "), strings.Join(scoreComponents, " + "))
 
-	rows, err := s.db.Query(sqlQuery, query)
+	rows, err := s.db.Query(sqlQuery, finalArgs...)
 	if err != nil {
-		slog.Error("Database query failed", "error", err, "query", query)
+		slog.Error("Database query failed", "error", err, "query", searchQuery)
 		return nil, NewErrorf(ErrCodeDatabaseFailure, "database query failed: %v", err)
 	}
 	defer rows.Close()
 
-	// Iterate through the results
 	results, err := s.scanRegions(rows)
 	if err != nil {
 		return nil, err
 	}
 
-	slog.Info("Search completed", "query", query, "results", len(results))
+	slog.Info("Search completed", "query", searchQuery, "results", len(results))
 	return results, nil
 }
 

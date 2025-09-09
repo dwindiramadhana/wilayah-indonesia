@@ -1,0 +1,50 @@
+# wilayah-indonesia API Testing
+
+@host = localhost
+@port = 8080
+@baseUrl = http://{{host}}:{{port}}
+
+### 1. General search endpoint with successful result
+GET {{baseUrl}}/v1/search?q='Perumahan Alam Citra 1 Jalan Liposos No15a RT10 Paal Merah'
+
+### 2. General search endpoint with no results
+GET {{baseUrl}}/v1/search?q=nonexistentplace123
+
+### 3. District search endpoint with successful result
+GET {{baseUrl}}/v1/search/district?q=bandung
+
+### 4. District search endpoint with no results
+GET {{baseUrl}}/v1/search/district?q=nonexistentdistrict123
+
+### 5. Subdistrict search endpoint with successful result
+GET {{baseUrl}}/v1/search/subdistrict?q=menteng
+
+### 6. Subdistrict search endpoint with no results
+GET {{baseUrl}}/v1/search/subdistrict?q=nonexistentsubdistrict123
+
+### 7. City search endpoint with successful result
+GET {{baseUrl}}/v1/search/city?q=surabaya
+
+### 8. City search endpoint with no results
+GET {{baseUrl}}/v1/search/city?q=nonexistentcity123
+
+### 9. Province search endpoint with successful result
+GET {{baseUrl}}/v1/search/province?q=jawa%20tengah
+
+### 10. Province search endpoint with no results
+GET {{baseUrl}}/v1/search/province?q=nonexistentprovince123
+
+### 11. Endpoint without required query parameter
+GET {{baseUrl}}/v1/search
+
+### 12. Postal code search endpoint with successful result
+GET {{baseUrl}}/v1/search/postal/12510
+
+### 13. Postal code search endpoint with invalid postal code format
+GET {{baseUrl}}/v1/search/postal/123
+
+### 14. Postal code search endpoint with non-existent postal code
+GET {{baseUrl}}/v1/search/postal/99999
+
+### 15. General search endpoint with province specific and successful result
+GET {{baseUrl}}/v1/search?q=serang&subdistrict=bandng

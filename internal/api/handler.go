@@ -23,17 +23,25 @@ func New(svc *service.Service) *Handler {
 // SearchHandler handles the search endpoint
 func (h *Handler) SearchHandler() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		// Extract and validate the q query parameter
-		query := c.Query("q")
-		if query == "" {
+		// Extract query parameters
+		searchQuery := service.SearchQuery{
+			Query:       c.Query("q"),
+			Subdistrict: c.Query("subdistrict"),
+			District:    c.Query("district"),
+			City:        c.Query("city"),
+			Province:    c.Query("province"),
+		}
+
+		// Validate that at least one query parameter is provided
+		if searchQuery.Query == "" && searchQuery.Subdistrict == "" && searchQuery.District == "" && searchQuery.City == "" && searchQuery.Province == "" {
 			slog.Warn("Search query parameter missing", "ip", c.IP())
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Query parameter 'q' is required",
+				"error": "At least one query parameter (q, subdistrict, district, city, province) is required",
 			})
 		}
 
 		// Use the service to perform the search
-		results, err := h.svc.Search(query)
+		results, err := h.svc.Search(searchQuery)
 		if err != nil {
 			if service.IsError(err, service.ErrCodeInvalidInput) {
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
