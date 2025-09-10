@@ -14,6 +14,14 @@ echo "======================================"
 echo -e "\n1. Testing general search endpoint with successful result:"
 curl -s "http://${HOST}:${PORT}/v1/search?q=jakarta" | jq '.'
 
+# Test 1b: General search with province filter (BM25 + province fuzzy)
+echo -e "\n1b. Testing general search with province filter (BM25 + province fuzzy):"
+curl -s "http://${HOST}:${PORT}/v1/search?q=bandung&province=Jawa%20Barat" | jq '.'
+
+# Test 1c: General search with only field filters (no q)
+echo -e "\n1c. Testing general search with only field filters (no q):"
+curl -s "http://${HOST}:${PORT}/v1/search?district=Cidadap&city=Bandung&province=Jawa%20Barat" | jq '.'
+
 # Test 2: General search endpoint with no results
 echo -e "\n2. Testing general search endpoint with no results:"
 curl -s "http://${HOST}:${PORT}/v1/search?q=nonexistentplace123" | jq '.'
@@ -22,6 +30,14 @@ curl -s "http://${HOST}:${PORT}/v1/search?q=nonexistentplace123" | jq '.'
 echo -e "\n3. Testing district search endpoint with successful result:"
 curl -s "http://${HOST}:${PORT}/v1/search/district?q=bandung" | jq '.'
 
+# Test 3b: District search with city narrowing
+echo -e "\n3b. Testing district search with city narrowing:"
+curl -s "http://${HOST}:${PORT}/v1/search/district?q=bandung&city=serang" | jq '.'
+
+# Test 3c: District search with city and province narrowing
+echo -e "\n3c. Testing district search with city and province narrowing:"
+curl -s "http://${HOST}:${PORT}/v1/search/district?q=bandung&city=serang&province=banten" | jq '.'
+
 # Test 4: District search endpoint with no results
 echo -e "\n4. Testing district search endpoint with no results:"
 curl -s "http://${HOST}:${PORT}/v1/search/district?q=nonexistentdistrict123" | jq '.'
@@ -29,6 +45,14 @@ curl -s "http://${HOST}:${PORT}/v1/search/district?q=nonexistentdistrict123" | j
 # Test 5: Subdistrict search endpoint with successful result
 echo -e "\n5. Testing subdistrict search endpoint with successful result:"
 curl -s "http://${HOST}:${PORT}/v1/search/subdistrict?q=menteng" | jq '.'
+
+# Test 5b: Subdistrict search with district narrowing
+echo -e "\n5b. Testing subdistrict search with district narrowing:"
+curl -s "http://${HOST}:${PORT}/v1/search/subdistrict?q=menteng&district=tebet" | jq '.'
+
+# Test 5c: Subdistrict search with district, city and province narrowing
+echo -e "\n5c. Testing subdistrict search with district, city and province narrowing:"
+curl -s "http://${HOST}:${PORT}/v1/search/subdistrict?q=menteng&district=tebet&city=jakarta%20selatan&province=dki%20jakarta" | jq '.'
 
 # Test 6: Subdistrict search endpoint with no results
 echo -e "\n6. Testing subdistrict search endpoint with no results:"
