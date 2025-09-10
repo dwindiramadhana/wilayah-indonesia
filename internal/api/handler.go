@@ -66,23 +66,27 @@ func (h *Handler) SearchHandler() fiber.Handler {
 
 // DistrictSearchHandler handles the district search endpoint
 func (h *Handler) DistrictSearchHandler() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		// Extract and validate the q query parameter
-		query := c.Query("q")
-		if query == "" {
-			slog.Warn("District search query parameter missing", "ip", c.IP())
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Query parameter 'q' is required",
-			})
-		}
+    return func(c *fiber.Ctx) error {
+        // Extract and validate the q query parameter
+        query := c.Query("q")
+        if query == "" {
+            slog.Warn("District search query parameter missing", "ip", c.IP())
+            return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+                "error": "Query parameter 'q' is required",
+            })
+        }
 
-		// Use the service to perform the search
-		results, err := h.svc.SearchByDistrict(query)
-		if err != nil {
-			if service.IsError(err, service.ErrCodeInvalidInput) {
-				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-					"error": err.Error(),
-				})
+        // Optional narrowing filters
+        city := c.Query("city")
+        province := c.Query("province")
+
+        // Use the service to perform the search
+        results, err := h.svc.SearchByDistrict(query, city, province)
+        if err != nil {
+            if service.IsError(err, service.ErrCodeInvalidInput) {
+                return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+                    "error": err.Error(),
+                })
 			}
 			if service.IsError(err, service.ErrCodeDatabaseFailure) {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -102,23 +106,28 @@ func (h *Handler) DistrictSearchHandler() fiber.Handler {
 
 // SubdistrictSearchHandler handles the subdistrict search endpoint
 func (h *Handler) SubdistrictSearchHandler() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		// Extract and validate the q query parameter
-		query := c.Query("q")
-		if query == "" {
-			slog.Warn("Subdistrict search query parameter missing", "ip", c.IP())
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Query parameter 'q' is required",
-			})
-		}
+    return func(c *fiber.Ctx) error {
+        // Extract and validate the q query parameter
+        query := c.Query("q")
+        if query == "" {
+            slog.Warn("Subdistrict search query parameter missing", "ip", c.IP())
+            return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+                "error": "Query parameter 'q' is required",
+            })
+        }
 
-		// Use the service to perform the search
-		results, err := h.svc.SearchBySubdistrict(query)
-		if err != nil {
-			if service.IsError(err, service.ErrCodeInvalidInput) {
-				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-					"error": err.Error(),
-				})
+        // Optional narrowing filters
+        district := c.Query("district")
+        city := c.Query("city")
+        province := c.Query("province")
+
+        // Use the service to perform the search
+        results, err := h.svc.SearchBySubdistrict(query, district, city, province)
+        if err != nil {
+            if service.IsError(err, service.ErrCodeInvalidInput) {
+                return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+                    "error": err.Error(),
+                })
 			}
 			if service.IsError(err, service.ErrCodeDatabaseFailure) {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

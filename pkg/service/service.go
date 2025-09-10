@@ -156,72 +156,137 @@ func (s *Service) Search(searchQuery SearchQuery) ([]Region, error) {
 	return results, nil
 }
 
-// SearchByDistrict searches for regions by district name.
-func (s *Service) SearchByDistrict(query string) ([]Region, error) {
-	if query == "" {
-		return nil, NewError(ErrCodeInvalidInput, "query parameter is required")
-	}
+// SearchByDistrict searches for regions by district name, optionally narrowed by city and province.
+func (s *Service) SearchByDistrict(district string, city string, province string) ([]Region, error) {
+    if district == "" {
+        return nil, NewError(ErrCodeInvalidInput, "query parameter is required")
+    }
 
-	slog.Info("Processing district search request", "query", query)
+    slog.Info("Processing district search request", "district", district, "city", city, "province", province)
 
-	// Prepare and execute the SQL query
-	sqlQuery := `
-		SELECT id, subdistrict, district, city, province, postal_code, full_text
-		FROM regions
-		WHERE jaro_winkler_similarity (district, ?) >= 0.8
-		ORDER BY jaro_winkler_similarity (district, ?) DESC
-		LIMIT 10
-	`
+    // Build dynamic conditions and scoring based on provided filters
+    var conditions []string
+    var scoreComponents []string
+    var args []interface{}
+    var orderByArgs []interface{}
 
-	rows, err := s.db.Query(sqlQuery, query, query)
-	if err != nil {
-		slog.Error("Database query failed", "error", err, "query", query)
-		return nil, NewErrorf(ErrCodeDatabaseFailure, "database query failed: %v", err)
-	}
-	defer rows.Close()
+    // District is required
+    conditions = append(conditions, "jaro_winkler_similarity(district, ?) >= 0.8")
+    scoreComponents = append(scoreComponents, "jaro_winkler_similarity(district, ?)")
+    args = append(args, district)
+    orderByArgs = append(orderByArgs, district)
 
-	// Iterate through the results
-	results, err := s.scanRegions(rows)
-	if err != nil {
-		return nil, err
-	}
+    // Optional city filter (handles both Kota and Kabupaten prefixes)
+    if city != "" {
+        conditions = append(conditions, "(jaro_winkler_similarity(city, 'Kota ' || ?) >= 0.8 OR jaro_winkler_similarity(city, 'Kabupaten ' || ?) >= 0.8)")
+        scoreComponents = append(scoreComponents, "GREATEST(jaro_winkler_similarity(city, 'Kota ' || ?), jaro_winkler_similarity(city, 'Kabupaten ' || ?))")
+        args = append(args, city, city)
+        orderByArgs = append(orderByArgs, city, city)
+    }
 
-	slog.Info("District search completed", "query", query, "results", len(results))
-	return results, nil
+    // Optional province filter
+    if province != "" {
+        conditions = append(conditions, "jaro_winkler_similarity(province, ?) >= 0.8")
+        scoreComponents = append(scoreComponents, "jaro_winkler_similarity(province, ?)")
+        args = append(args, province)
+        orderByArgs = append(orderByArgs, province)
+    }
+
+    finalArgs := append(args, orderByArgs...)
+
+    sqlQuery := fmt.Sprintf(`
+        SELECT id, subdistrict, district, city, province, postal_code, full_text
+        FROM regions
+        WHERE %s
+        ORDER BY (%s) DESC
+        LIMIT 10
+    `, strings.Join(conditions, " AND "), strings.Join(scoreComponents, " + "))
+
+    rows, err := s.db.Query(sqlQuery, finalArgs...)
+    if err != nil {
+        slog.Error("Database query failed", "error", err, "district", district, "city", city, "province", province)
+        return nil, NewErrorf(ErrCodeDatabaseFailure, "database query failed: %v", err)
+    }
+    defer rows.Close()
+
+    // Iterate through the results
+    results, err := s.scanRegions(rows)
+    if err != nil {
+        return nil, err
+    }
+
+    slog.Info("District search completed", "district", district, "city", city, "province", province, "results", len(results))
+    return results, nil
 }
 
-// SearchBySubdistrict searches for regions by subdistrict name.
-func (s *Service) SearchBySubdistrict(query string) ([]Region, error) {
-	if query == "" {
-		return nil, NewError(ErrCodeInvalidInput, "query parameter is required")
-	}
+// SearchBySubdistrict searches for regions by subdistrict name, optionally narrowed by district, city, and province.
+func (s *Service) SearchBySubdistrict(subdistrict string, district string, city string, province string) ([]Region, error) {
+    if subdistrict == "" {
+        return nil, NewError(ErrCodeInvalidInput, "query parameter is required")
+    }
 
-	slog.Info("Processing subdistrict search request", "query", query)
+    slog.Info("Processing subdistrict search request", "subdistrict", subdistrict, "district", district, "city", city, "province", province)
 
-	// Prepare and execute the SQL query
-	sqlQuery := `
-		SELECT id, subdistrict, district, city, province, postal_code, full_text
-		FROM regions
-		WHERE jaro_winkler_similarity (subdistrict, ?) >= 0.8
-		ORDER BY jaro_winkler_similarity (subdistrict, ?) DESC
-		LIMIT 10
-	`
+    var conditions []string
+    var scoreComponents []string
+    var args []interface{}
+    var orderByArgs []interface{}
 
-	rows, err := s.db.Query(sqlQuery, query, query)
-	if err != nil {
-		slog.Error("Database query failed", "error", err, "query", query)
-		return nil, NewErrorf(ErrCodeDatabaseFailure, "database query failed: %v", err)
-	}
-	defer rows.Close()
+    // Required subdistrict condition
+    conditions = append(conditions, "jaro_winkler_similarity(subdistrict, ?) >= 0.8")
+    scoreComponents = append(scoreComponents, "jaro_winkler_similarity(subdistrict, ?)")
+    args = append(args, subdistrict)
+    orderByArgs = append(orderByArgs, subdistrict)
 
-	// Iterate through the results
-	results, err := s.scanRegions(rows)
-	if err != nil {
-		return nil, err
-	}
+    // Optional district filter
+    if district != "" {
+        conditions = append(conditions, "jaro_winkler_similarity(district, ?) >= 0.8")
+        scoreComponents = append(scoreComponents, "jaro_winkler_similarity(district, ?)")
+        args = append(args, district)
+        orderByArgs = append(orderByArgs, district)
+    }
 
-	slog.Info("Subdistrict search completed", "query", query, "results", len(results))
-	return results, nil
+    // Optional city filter (supports Kota/Kabupaten)
+    if city != "" {
+        conditions = append(conditions, "(jaro_winkler_similarity(city, 'Kota ' || ?) >= 0.8 OR jaro_winkler_similarity(city, 'Kabupaten ' || ?) >= 0.8)")
+        scoreComponents = append(scoreComponents, "GREATEST(jaro_winkler_similarity(city, 'Kota ' || ?), jaro_winkler_similarity(city, 'Kabupaten ' || ?))")
+        args = append(args, city, city)
+        orderByArgs = append(orderByArgs, city, city)
+    }
+
+    // Optional province filter
+    if province != "" {
+        conditions = append(conditions, "jaro_winkler_similarity(province, ?) >= 0.8")
+        scoreComponents = append(scoreComponents, "jaro_winkler_similarity(province, ?)")
+        args = append(args, province)
+        orderByArgs = append(orderByArgs, province)
+    }
+
+    finalArgs := append(args, orderByArgs...)
+
+    sqlQuery := fmt.Sprintf(`
+        SELECT id, subdistrict, district, city, province, postal_code, full_text
+        FROM regions
+        WHERE %s
+        ORDER BY (%s) DESC
+        LIMIT 10
+    `, strings.Join(conditions, " AND "), strings.Join(scoreComponents, " + "))
+
+    rows, err := s.db.Query(sqlQuery, finalArgs...)
+    if err != nil {
+        slog.Error("Database query failed", "error", err, "subdistrict", subdistrict, "district", district, "city", city, "province", province)
+        return nil, NewErrorf(ErrCodeDatabaseFailure, "database query failed: %v", err)
+    }
+    defer rows.Close()
+
+    // Iterate through the results
+    results, err := s.scanRegions(rows)
+    if err != nil {
+        return nil, err
+    }
+
+    slog.Info("Subdistrict search completed", "subdistrict", subdistrict, "district", district, "city", city, "province", province, "results", len(results))
+    return results, nil
 }
 
 // SearchByCity searches for regions by city name.
@@ -380,5 +445,3 @@ func (s *Service) scanRegions(rows *sql.Rows) ([]Region, error) {
 
 	return results, nil
 }
-
-
