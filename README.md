@@ -36,22 +36,35 @@ A high-performance, dependency-free Go API for fuzzy searching Indonesian admini
 
 ### Search Endpoint
 
-The general search endpoint now uses DuckDB's `match_bm25` function to perform a full-text search over a combined `full_text` field, which includes the province, city, district, and subdistrict names. This provides fast and relevant search results across all administrative levels.
+The general search endpoint supports both full-text and field-level fuzzy filters. Use any combination of the parameters below to narrow results.
 
-- **BM25 Full-Text Search**: The search is powered by the BM25 algorithm, which ranks results based on relevance to the query terms.
-- **Combined Text Field**: The `full_text` field is a concatenation of all administrative levels, allowing for a comprehensive search in a single query.
-- **Performance**: The query is highly optimized for performance, returning the top 10 results ordered by relevance score.
+- **BM25 Full-Text Search**: `q` uses DuckDB `match_bm25` over a combined `full_text` column.
+- **Field Fuzzy Filters**: `subdistrict`, `district`, `city`, `province` use Jaro-Winkler (≥ 0.8).
+- **Composable**: Combine parameters; scores are aggregated and results ordered by total score.
+- **City matching**: `city` matches both "Kota {name}" and "Kabupaten {name}" automatically.
+- **Performance**: Returns top 10 results.
 
 ```
-GET /v1/search?q={query}
+GET /v1/search?q={query}&subdistrict={name}&district={name}&city={name}&province={name}
 ```
 
 **Parameters:**
-- `q` (required): Search query string (e.g., "bandung")
+- `q` (optional): Full-text query (e.g., "bandung").
+- `subdistrict` (optional): Fuzzy filter for subdistrict.
+- `district` (optional): Fuzzy filter for district.
+- `city` (optional): Fuzzy filter for city/regency (no need to prefix with Kota/Kabupaten).
+- `province` (optional): Fuzzy filter for province.
 
-**Example Request:**
+**Example Requests:**
 ```bash
+# Full-text only
 curl "http://localhost:8080/v1/search?q=bandung"
+
+# Combine full-text with province filter
+curl "http://localhost:8080/v1/search?q=bandung&province=Jawa Barat"
+
+# Field-only filters (no q)
+curl "http://localhost:8080/v1/search?district=Cidadap&city=Bandung&province=Jawa Barat"
 ```
 
 **Example Response:**
@@ -78,60 +91,55 @@ curl "http://localhost:8080/v1/search?q=bandung"
 
 ### Specific Search Endpoints
 
-In addition to the general search endpoint, the API provides specific search endpoints for each administrative level:
+In addition to the general search endpoint, the API provides specific search endpoints for each administrative level. All use Jaro-Winkler fuzzy matching (≥ 0.8), order by similarity, and return up to 10 results.
 
-- **District Search**: `/v1/search/district?q={query}`
-- **Subdistrict Search**: `/v1/search/subdistrict?q={query}`
-- **City Search**: `/v1/search/city?q={query}`
-- **Province Search**: `/v1/search/province?q={query}`
+- **District Search**: `/v1/search/district?q={district}&city={city}&province={province}`
+  - `q` is required; `city` and `province` are optional narrowing filters.
+  - `city` matches both Kota and Kabupaten prefixes automatically.
 
-Each specific search endpoint:
-- Takes a required `q` query parameter containing the search term
-- Returns a JSON array of matching regions at that administrative level
-- Uses the Jaro-Winkler similarity algorithm for fuzzy matching with a threshold of 0.8 (80% similarity)
-- Orders results by similarity score in descending order (most similar first)
-- Limits results to 10 items per search
-- Returns the same Region structure as the general search endpoint
+- **Subdistrict Search**: `/v1/search/subdistrict?q={subdistrict}&district={district}&city={city}&province={province}`
+  - `q` is required; `district`, `city`, and `province` are optional narrowing filters.
+  - `city` matches both Kota and Kabupaten prefixes automatically.
+
+- **City Search**: `/v1/search/city?q={city}`
+  - `q` is required; matches both Kota and Kabupaten.
+
+- **Province Search**: `/v1/search/province?q={province}`
+  - `q` is required.
 
 #### District Search Endpoint
 
-Each specific search endpoint utilizes DuckDB's built-in `jaro_winkler_similarity` function to provide fuzzy matching capabilities:
-
-- **District Search** (`/v1/search/district?q={query}`): Compares the search query directly against the district names
-- **Subdistrict Search** (`/v1/search/subdistrict?q={query}`): Compares the search query directly against the subdistrict names
-- **Province Search** (`/v1/search/province?q={query}`): Compares the search query directly against the province names
-- **City Search** (`/v1/search/city?q={query}`): Compares the search query against both "Kota " + query and "Kabupaten " + query to match both city and regency names
-
-The Jaro-Winkler similarity algorithm is particularly effective for this use case because:
-- It gives more favorable ratings to strings that match from the beginning, which is ideal for geographical names
-- The 0.8 threshold ensures that only highly similar matches are returned (80% similarity or higher)
-- Results are ordered by similarity score in descending order, with the most similar matches appearing first
-- Each endpoint is limited to returning a maximum of 10 results to ensure fast response times
-
 ```
-GET /v1/search/district?q={query}
+GET /v1/search/district?q={district}&city={city}&province={province}
 ```
 
 **Parameters:**
-- `q` (required): Search query string (e.g., "bandung")
+- `q` (required): District name to match (e.g., "sukasari").
+- `city` (optional): Narrow by city/regency (no need for Kota/Kabupaten).
+- `province` (optional): Narrow by province.
 
-**Example Request:**
+**Example Requests:**
 ```bash
-curl "http://localhost:8080/v1/search/district?q=bandung"
+curl "http://localhost:8080/v1/search/district?q=Cidadap"
+curl "http://localhost:8080/v1/search/district?q=Cidadap&city=Bandung&province=Jawa Barat"
 ```
 
 #### Subdistrict Search Endpoint
 
 ```
-GET /v1/search/subdistrict?q={query}
+GET /v1/search/subdistrict?q={subdistrict}&district={district}&city={city}&province={province}
 ```
 
 **Parameters:**
-- `q` (required): Search query string (e.g., "sukasari")
+- `q` (required): Subdistrict name (e.g., "sukasari").
+- `district` (optional): Narrow by district.
+- `city` (optional): Narrow by city/regency (Kota/Kabupaten handled automatically).
+- `province` (optional): Narrow by province.
 
-**Example Request:**
+**Example Requests:**
 ```bash
-curl "http://localhost:8080/v1/search/subdistrict?q=sukasari"
+curl "http://localhost:8080/v1/search/subdistrict?q=Sukasari"
+curl "http://localhost:8080/v1/search/subdistrict?q=Sukasari&district=Sukasari&city=Bandung&province=Jawa Barat"
 ```
 
 #### City Search Endpoint

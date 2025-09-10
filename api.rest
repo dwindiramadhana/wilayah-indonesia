@@ -10,14 +10,32 @@ GET {{baseUrl}}/v1/search?q='Perumahan Alam Citra 1 Jalan Liposos No15a RT10 Paa
 ### 2. General search endpoint with no results
 GET {{baseUrl}}/v1/search?q=nonexistentplace123
 
+### 2b. General search with province filter (BM25 + province fuzzy)
+GET {{baseUrl}}/v1/search?q=bandung&province=Jawa%20Barat
+
+### 2c. General search with only field filters (no q)
+GET {{baseUrl}}/v1/search?district=Cidadap&city=Bandung&province=Jawa%20Barat
+
 ### 3. District search endpoint with successful result
 GET {{baseUrl}}/v1/search/district?q=bandung
+
+### 3b. District search with city narrowing
+GET {{baseUrl}}/v1/search/district?q=bandung&city=bandung
+
+### 3c. District search with city and province narrowing
+GET {{baseUrl}}/v1/search/district?q=bandung&city=bandung&province=jawa%20barat
 
 ### 4. District search endpoint with no results
 GET {{baseUrl}}/v1/search/district?q=nonexistentdistrict123
 
 ### 5. Subdistrict search endpoint with successful result
 GET {{baseUrl}}/v1/search/subdistrict?q=menteng
+
+### 5b. Subdistrict search with district narrowing
+GET {{baseUrl}}/v1/search/subdistrict?q=menteng&district=tebet
+
+### 5c. Subdistrict search with district, city and province narrowing
+GET {{baseUrl}}/v1/search/subdistrict?q=menteng&district=tebet&city=jakarta%20selatan&province=dki%20jakarta
 
 ### 6. Subdistrict search endpoint with no results
 GET {{baseUrl}}/v1/search/subdistrict?q=nonexistentsubdistrict123
@@ -46,5 +64,11 @@ GET {{baseUrl}}/v1/search/postal/123
 ### 14. Postal code search endpoint with non-existent postal code
 GET {{baseUrl}}/v1/search/postal/99999
 
-### 15. General search endpoint with province specific and successful result
-GET {{baseUrl}}/v1/search?q=serang&subdistrict=bandng
+### 15. General search with province narrowing
+GET {{baseUrl}}/v1/search?q=serang&province=Banten
+
+### 16. General search with field-only narrowing (no q)
+GET {{baseUrl}}/v1/search?subdistrict=Sukasari&district=Sukasari&city=Bandung&province=Jawa%20Barat
+
+###
+GET {{baseUrl}}/v1/search?q='Jalan Phb Halong Atas Halong Teluk Ambon  gereja GMKI halong  Atas nama ade jesika'&district='teluk ambon'

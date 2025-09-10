@@ -33,3 +33,7 @@ go.work.sum
 
 
 data/*.sql
+
+# Local Go caches
+.gocache/
+.gomodcache/
