@@ -26,6 +26,7 @@ import json
 import sys
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
@@ -159,6 +160,12 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Emit verbose progress logs to stderr",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=8,
+        help="Maximum concurrent requests per level",
+    )
     return parser.parse_args(argv)
 
 
@@ -180,7 +187,6 @@ def build_headers(cookie: str) -> Dict[str, str]:
 
 
 def fetch_level(
-    session: requests.Session,
     base_url: str,
     level: str,
     parent: str,
@@ -206,7 +212,7 @@ def fetch_level(
             f"Requesting level={level} parent={parent or '-'} attempt={attempt}",
             verbose,
         )
-        response = session.get(base_url, params=params, headers=headers, timeout=timeout)
+        response = requests.get(base_url, params=params, headers=headers, timeout=timeout)
         if response.status_code == 200:
             try:
                 payload = response.json()
@@ -304,7 +310,6 @@ def extract_periode_values(raw_payload: object) -> List[str]:
 
 
 def crawl_hierarchy(
-    session: requests.Session,
     base_url: str,
     levels: List[str],
     periode_merge: str,
@@ -314,30 +319,78 @@ def crawl_hierarchy(
     delay: float,
     dry_run: bool,
     verbose: bool,
+    workers: int,
 ) -> Dict[str, List[Dict[str, Optional[str]]]]:
     """Fetch all requested levels and attach parent relationships."""
     collected: Dict[str, List[Dict[str, Optional[str]]]] = {level: [] for level in levels}
     province_lookup: Dict[str, str] = {}
+    seen_codes: Dict[str, set[str]] = {level: set() for level in levels}
 
     parents: List[str] = [""]
     for idx, level in enumerate(levels):
         next_parents: List[str] = []
+        results: Dict[str, List[Dict[str, str]]] = {}
+
+        if dry_run or len(parents) == 1:
+            # Fall back to sequential to keep dry-run output readable or when only root.
+            for parent in parents:
+                results[parent] = fetch_level(
+                    base_url,
+                    level,
+                    parent,
+                    periode_merge,
+                    headers,
+                    timeout,
+                    retries,
+                    delay,
+                    dry_run,
+                    verbose,
+                )
+        else:
+            max_workers = max(1, workers)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_map = {
+                    executor.submit(
+                        fetch_level,
+                        base_url,
+                        level,
+                        parent,
+                        periode_merge,
+                        headers,
+                        timeout,
+                        retries,
+                        delay,
+                        dry_run,
+                        verbose,
+                    ): parent
+                    for parent in parents
+                }
+                for future in as_completed(future_map):
+                    parent = future_map[future]
+                    try:
+                        payload = future.result()
+                    except Exception as exc:  # propagate with context
+                        raise FetchError(
+                            f"Failed to fetch level={level} parent={parent}: {exc}"
+                        ) from exc
+                    results[parent] = payload
+
         for parent in parents:
-            payload = fetch_level(
-                session,
-                base_url,
-                level,
-                parent,
-                periode_merge,
-                headers,
-                timeout,
-                retries,
-                delay,
-                dry_run,
-                verbose,
-            )
+            payload = results.get(parent, [])
             for item in payload:
                 kode_bps = str(item.get("kode_bps", "")).strip()
+                if not kode_bps or kode_bps == "0":
+                    log(
+                        f"Skipping level={level} parent={parent or '-'} with empty kode_bps",
+                        verbose,
+                    )
+                    continue
+                if kode_bps in seen_codes[level]:
+                    log(
+                        f"Skipping duplicate level={level} kode_bps={kode_bps}",
+                        verbose,
+                    )
+                    continue
                 record = {
                     "level": level,
                     "kode_bps": kode_bps,
@@ -346,6 +399,7 @@ def crawl_hierarchy(
                     "nama_dagri": str(item.get("nama_dagri", "")).strip(),
                     "parent_kode_bps": parent or None,
                 }
+                seen_codes[level].add(kode_bps)
                 if idx == 0:
                     province_lookup[kode_bps] = kode_bps
                     record["province_kode_bps"] = kode_bps
@@ -355,6 +409,7 @@ def crawl_hierarchy(
                 collected[level].append(record)
                 if idx + 1 < len(levels):
                     next_parents.append(kode_bps)
+
         parents = next_parents
         time.sleep(delay)
     return collected
@@ -612,7 +667,6 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
             args.raw_dir, args.processed_dir, args.sql_dir, periode
         )
     collected = crawl_hierarchy(
-        session=session,
         base_url=args.base_url,
         levels=levels,
         periode_merge=periode,
@@ -622,6 +676,7 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
         delay=args.delay,
         dry_run=args.dry_run,
         verbose=verbose,
+        workers=args.workers,
     )
 
     counts = {level: len(collected[level]) for level in levels}
@@ -664,6 +719,7 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
     ]
     for level in levels:
         summary_lines.append(f"  - {level:<10}: {counts[level]} rows")
+    summary_lines.append(f"Workers      : {args.workers}")
     sys.stdout.write("\n".join(summary_lines) + "\n")
 
 

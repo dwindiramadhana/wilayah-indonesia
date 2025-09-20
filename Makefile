@@ -30,7 +30,7 @@ ingest:
 	go run ./$(INGESTOR_DIR)
 # Download the administrative data SQL file
 .PHONY: download-data
-download-data: download-admin-data download-kodepos-data
+download-data: download-admin-data download-kodepos-data fetch-bps
 
 # Download the administrative data SQL file
 .PHONY: download-admin-data
@@ -50,7 +50,7 @@ prepare-db: download-data ingest
 # Fetch wilayah data from BPS API and render SQL dump
 .PHONY: fetch-bps
 fetch-bps:
-	python3 scripts/fetch_bps_wilayah.py --periode-merge $(PERIODE)
+	python3 scripts/fetch_bps_wilayah.py --periode-merge $(PERIODE) --workers 8 --sql-dir data --sql-filename bps_wilayah.sql
 
 
 # Run tests
