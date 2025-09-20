@@ -18,7 +18,7 @@ GET {{baseUrl}}/v1/search?district=Cidadap&city=Bandung&province=Jawa%20Barat
 
 ### 2d. General search requesting BPS metadata and scores
 GET {{baseUrl}}/v1/search?q=bandung&include_bps=true&include_scores=true&limit=5
-
+ 
 ### 2e. General search using BPS terminology
 GET {{baseUrl}}/v1/search?q=kemayoran&search_bps=true&include_bps=true
 
@@ -26,13 +26,13 @@ GET {{baseUrl}}/v1/search?q=kemayoran&search_bps=true&include_bps=true
 GET {{baseUrl}}/v1/search/district?q=bandung
 
 ### 3b. District search with city narrowing
-GET {{baseUrl}}/v1/search/district?q=bandung&city=bandung
+GET {{baseUrl}}/v1/search/district?q=bandung&city=serang
 
 ### 3c. District search with city and province narrowing
-GET {{baseUrl}}/v1/search/district?q=bandung&city=bandung&province=jawa%20barat
+GET {{baseUrl}}/v1/search/district?q=bandung&city=serang&province=jawa%20barat
 
 ### 3d. District search with scoring and BPS metadata
-GET {{baseUrl}}/v1/search/district?q=bandung&city=bandung&include_scores=true&include_bps=true&limit=3
+GET {{baseUrl}}/v1/search/district?q=bandung&city=serang&include_scores=true&include_bps=true&limit=3
 
 ### 4. District search endpoint with no results
 GET {{baseUrl}}/v1/search/district?q=nonexistentdistrict123
@@ -41,10 +41,10 @@ GET {{baseUrl}}/v1/search/district?q=nonexistentdistrict123
 GET {{baseUrl}}/v1/search/subdistrict?q=menteng
 
 ### 5b. Subdistrict search with district narrowing
-GET {{baseUrl}}/v1/search/subdistrict?q=menteng&district=tebet
+GET {{baseUrl}}/v1/search/subdistrict?q=menteng&city='kota administrasi jakarta pusat'
 
 ### 5c. Subdistrict search with district, city and province narrowing
-GET {{baseUrl}}/v1/search/subdistrict?q=menteng&district=tebet&city=jakarta%20selatan&province=dki%20jakarta
+GET {{baseUrl}}/v1/search/subdistrict?q=sepang&district=taktakan&city=serang&province=banten&include_scores=true&limit=5
 
 ### 5d. Subdistrict search with BPS metadata
 GET {{baseUrl}}/v1/search/subdistrict?q=menteng&include_bps=true&include_scores=true
