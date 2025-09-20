@@ -31,7 +31,21 @@ A high-performance, dependency-free Go API for fuzzy searching Indonesian admini
 - **High Performance**: Powered by DuckDB for fast querying of Indonesian administrative data.
 - **Lightweight**: Minimal dependencies with the GoFiber web framework.
 - **Container Ready**: Dockerized application for easy deployment.
-- **Configurable**: Environment-based configuration for port and database path.
+- **Clean Architecture**: Delivery, use case, repository, and gateway layers are isolated to keep business rules portable.
+- **Configurable**: Environment-based configuration for port, database path, and ingestion data directory.
+
+## Architecture Overview
+
+The codebase follows a Clean Architecture layout:
+
+- `cmd/api`, `cmd/ingestor` – binary entrypoints that delegate to internal bootstrappers.
+- `internal/config` – central wiring for loggers, DuckDB connections, Fiber apps, and use cases.
+- `internal/delivery/http` – Fiber controllers, routes, and middleware for the public API.
+- `internal/delivery/worker` – CLI-facing delivery adapter that runs dataset refresh workflows.
+- `internal/usecase` – business rules for region search and dataset ingestion.
+- `internal/repository/duckdb` – data-access implementations and administrative helpers for DuckDB.
+- `internal/gateway` – filesystem loader and SQL normalizer abstractions used by the ingestion flow.
+- `internal/shared` – cross-cutting concerns such as error taxonomy.
 
 ## API Usage
 
@@ -250,7 +264,8 @@ The application can be configured using the following environment variables:
 | Variable | Description | Default Value |
 |----------|-------------|---------------|
 | `PORT` | Port for the API server to listen on | `8080` |
-| `DB_PATH` | Path to the DuckDB database file | `data/regions.duckdb` |
+| `DB_PATH` | Path to the DuckDB database file. The API opens it read-only; the ingestor opens it read-write. | `data/regions.duckdb` |
+| `DATA_DIR` | Base directory containing SQL dumps used by the ingestor (`wilayah.sql`, `wilayah_kodepos.sql`, `bps_wilayah.sql`) | `data/` |
 
 ## Quick Start
 

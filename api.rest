@@ -83,4 +83,4 @@ GET {{baseUrl}}/v1/search?q=serang&province=Banten
 GET {{baseUrl}}/v1/search?subdistrict=Sukasari&district=Sukasari&city=Bandung&province=Jawa%20Barat
 
 ###
-GET {{baseUrl}}/v1/search?q='Jalan Phb Halong Atas Halong Teluk Ambon  gereja GMKI halong  Atas nama ade jesika'&district='teluk ambon'
+GET {{baseUrl}}/v1/search?q='Halong'
