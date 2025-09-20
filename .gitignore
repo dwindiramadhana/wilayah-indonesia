@@ -37,3 +37,16 @@ data/*.sql
 # Local Go caches
 .gocache/
 .gomodcache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+
+# Data files
+data/processed
+data/raw
+data/sql

@@ -8,6 +8,7 @@ DATA_DIR=data
 DB_FILE=$(DATA_DIR)/regions.duckdb
 SQL_FILE=$(DATA_DIR)/wilayah.sql
 KODEPOS_FILE=$(DATA_DIR)/wilayah_kodepos.sql
+PERIODE?=latest
 
 # Default target
 .PHONY: all
@@ -44,6 +45,12 @@ download-kodepos-data:
 # Prepare the database (download data and run ingestor)
 .PHONY: prepare-db
 prepare-db: download-data ingest
+
+
+# Fetch wilayah data from BPS API and render SQL dump
+.PHONY: fetch-bps
+fetch-bps:
+	python3 scripts/fetch_bps_wilayah.py --periode-merge $(PERIODE)
 
 
 # Run tests
@@ -85,6 +92,7 @@ help:
 	@echo "  download-data - Download all data files"
 	@echo "  download-admin-data - Download administrative data file"
 	@echo "  download-kodepos-data - Download postal code data file"
+	@echo "  fetch-bps    - Crawl BPS API and emit SQL dump (PERIODE=$(PERIODE))"
 	@echo "  prepare-db   - Download data and run ingestor"
 	@echo "  test         - Run tests"
 	@echo "  clean        - Clean build artifacts and data files"
