@@ -21,7 +21,10 @@ func ExampleService() {
 	svc := service.New(db)
 
 	// Perform a general search
-	regions, err := svc.Search("Jakarta")
+	regions, err := svc.Search(service.SearchQuery{
+		Query:   "Jakarta",
+		Options: service.SearchOptions{Limit: 5},
+	})
 	if err != nil {
 		log.Fatal(err)
 	}

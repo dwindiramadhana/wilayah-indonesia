@@ -2,7 +2,9 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
+	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/ilmimris/wilayah-indonesia/pkg/service"
@@ -20,9 +22,60 @@ func New(svc *service.Service) *Handler {
 	}
 }
 
+func parseBoolQueryParam(c *fiber.Ctx, key string) (bool, error) {
+	value := c.Query(key)
+	if value == "" {
+		return false, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("invalid boolean value for '%s'", key)
+	}
+	return parsed, nil
+}
+
+func parseSearchOptions(c *fiber.Ctx) (service.SearchOptions, error) {
+	var opts service.SearchOptions
+
+	if value := c.Query("limit"); value != "" {
+		limit, err := strconv.Atoi(value)
+		if err != nil {
+			return opts, fmt.Errorf("invalid integer value for 'limit'")
+		}
+		opts.Limit = limit
+	}
+
+	if parsed, err := parseBoolQueryParam(c, "search_bps"); err != nil {
+		return opts, err
+	} else {
+		opts.SearchBPS = parsed
+	}
+
+	if parsed, err := parseBoolQueryParam(c, "include_bps"); err != nil {
+		return opts, err
+	} else {
+		opts.IncludeBPS = parsed
+	}
+
+	if parsed, err := parseBoolQueryParam(c, "include_scores"); err != nil {
+		return opts, err
+	} else {
+		opts.IncludeScores = parsed
+	}
+
+	return opts, nil
+}
+
 // SearchHandler handles the search endpoint
 func (h *Handler) SearchHandler() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		opts, err := parseSearchOptions(c)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
 		// Extract query parameters
 		searchQuery := service.SearchQuery{
 			Query:       c.Query("q"),
@@ -30,6 +83,7 @@ func (h *Handler) SearchHandler() fiber.Handler {
 			District:    c.Query("district"),
 			City:        c.Query("city"),
 			Province:    c.Query("province"),
+			Options:     opts,
 		}
 
 		// Validate that at least one query parameter is provided
@@ -66,27 +120,34 @@ func (h *Handler) SearchHandler() fiber.Handler {
 
 // DistrictSearchHandler handles the district search endpoint
 func (h *Handler) DistrictSearchHandler() fiber.Handler {
-    return func(c *fiber.Ctx) error {
-        // Extract and validate the q query parameter
-        query := c.Query("q")
-        if query == "" {
-            slog.Warn("District search query parameter missing", "ip", c.IP())
-            return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-                "error": "Query parameter 'q' is required",
-            })
-        }
+	return func(c *fiber.Ctx) error {
+		// Extract and validate the q query parameter
+		query := c.Query("q")
+		if query == "" {
+			slog.Warn("District search query parameter missing", "ip", c.IP())
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Query parameter 'q' is required",
+			})
+		}
 
-        // Optional narrowing filters
-        city := c.Query("city")
-        province := c.Query("province")
+		// Optional narrowing filters
+		city := c.Query("city")
+		province := c.Query("province")
 
-        // Use the service to perform the search
-        results, err := h.svc.SearchByDistrict(query, city, province)
-        if err != nil {
-            if service.IsError(err, service.ErrCodeInvalidInput) {
-                return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-                    "error": err.Error(),
-                })
+		// Use the service to perform the search
+		opts, err := parseSearchOptions(c)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
+		results, err := h.svc.SearchByDistrict(query, city, province, opts)
+		if err != nil {
+			if service.IsError(err, service.ErrCodeInvalidInput) {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": err.Error(),
+				})
 			}
 			if service.IsError(err, service.ErrCodeDatabaseFailure) {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -106,28 +167,35 @@ func (h *Handler) DistrictSearchHandler() fiber.Handler {
 
 // SubdistrictSearchHandler handles the subdistrict search endpoint
 func (h *Handler) SubdistrictSearchHandler() fiber.Handler {
-    return func(c *fiber.Ctx) error {
-        // Extract and validate the q query parameter
-        query := c.Query("q")
-        if query == "" {
-            slog.Warn("Subdistrict search query parameter missing", "ip", c.IP())
-            return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-                "error": "Query parameter 'q' is required",
-            })
-        }
+	return func(c *fiber.Ctx) error {
+		// Extract and validate the q query parameter
+		query := c.Query("q")
+		if query == "" {
+			slog.Warn("Subdistrict search query parameter missing", "ip", c.IP())
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Query parameter 'q' is required",
+			})
+		}
 
-        // Optional narrowing filters
-        district := c.Query("district")
-        city := c.Query("city")
-        province := c.Query("province")
+		// Optional narrowing filters
+		district := c.Query("district")
+		city := c.Query("city")
+		province := c.Query("province")
 
-        // Use the service to perform the search
-        results, err := h.svc.SearchBySubdistrict(query, district, city, province)
-        if err != nil {
-            if service.IsError(err, service.ErrCodeInvalidInput) {
-                return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-                    "error": err.Error(),
-                })
+		// Use the service to perform the search
+		opts, err := parseSearchOptions(c)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
+		results, err := h.svc.SearchBySubdistrict(query, district, city, province, opts)
+		if err != nil {
+			if service.IsError(err, service.ErrCodeInvalidInput) {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": err.Error(),
+				})
 			}
 			if service.IsError(err, service.ErrCodeDatabaseFailure) {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -157,8 +225,15 @@ func (h *Handler) CitySearchHandler() fiber.Handler {
 			})
 		}
 
+		opts, err := parseSearchOptions(c)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
 		// Use the service to perform the search
-		results, err := h.svc.SearchByCity(query)
+		results, err := h.svc.SearchByCity(query, opts)
 		if err != nil {
 			if service.IsError(err, service.ErrCodeInvalidInput) {
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -193,8 +268,15 @@ func (h *Handler) ProvinceSearchHandler() fiber.Handler {
 			})
 		}
 
+		opts, err := parseSearchOptions(c)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
 		// Use the service to perform the search
-		results, err := h.svc.SearchByProvince(query)
+		results, err := h.svc.SearchByProvince(query, opts)
 		if err != nil {
 			if service.IsError(err, service.ErrCodeInvalidInput) {
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -229,8 +311,15 @@ func (h *Handler) PostalCodeSearchHandler() fiber.Handler {
 			})
 		}
 
+		opts, err := parseSearchOptions(c)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
 		// Use the service to perform the search
-		results, err := h.svc.SearchByPostalCode(postalCode)
+		results, err := h.svc.SearchByPostalCode(postalCode, opts)
 		if err != nil {
 			if service.IsError(err, service.ErrCodeInvalidInput) {
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{

@@ -27,6 +27,7 @@ A high-performance, dependency-free Go API for fuzzy searching Indonesian admini
 
 - **BM25 Full-Text Search**: Utilizes DuckDB's `match_bm25` for fast and relevant full-text search across all administrative levels.
 - **Fuzzy Search**: Employs the Jaro-Winkler similarity algorithm for typo-tolerant searches on specific administrative levels (province, city, district, subdistrict).
+- **BPS Integration**: Optionally search and respond with official BPS (Badan Pusat Statistik) codes and names.
 - **High Performance**: Powered by DuckDB for fast querying of Indonesian administrative data.
 - **Lightweight**: Minimal dependencies with the GoFiber web framework.
 - **Container Ready**: Dockerized application for easy deployment.
@@ -54,6 +55,10 @@ GET /v1/search?q={query}&subdistrict={name}&district={name}&city={name}&province
 - `district` (optional): Fuzzy filter for district.
 - `city` (optional): Fuzzy filter for city/regency (no need to prefix with Kota/Kabupaten).
 - `province` (optional): Fuzzy filter for province.
+- `limit` (optional): Maximum records to return (defaults to 10, capped at 100).
+- `search_bps` (optional): When `true`, fuzzy comparisons use BPS (Badan Pusat Statistik) names.
+- `include_bps` (optional): When `true`, the response adds BPS codes and names for each level.
+- `include_scores` (optional): When `true`, the response adds the full-text score and per-field similarity scores.
 
 **Example Requests:**
 ```bash
@@ -65,6 +70,12 @@ curl "http://localhost:8080/v1/search?q=bandung&province=Jawa Barat"
 
 # Field-only filters (no q)
 curl "http://localhost:8080/v1/search?district=Cidadap&city=Bandung&province=Jawa Barat"
+
+# Request BPS metadata and scoring
+curl "http://localhost:8080/v1/search?q=bandung&include_bps=true&include_scores=true&limit=5"
+
+# Search using BPS naming
+curl "http://localhost:8080/v1/search?q=kemayoran&search_bps=true&include_bps=true"
 ```
 
 **Example Response:**
@@ -76,41 +87,47 @@ curl "http://localhost:8080/v1/search?district=Cidadap&city=Bandung&province=Jaw
     "district": "Sukasari",
     "city": "Kota Bandung",
     "province": "Jawa Barat",
-    "full_text": "jawa barat kota bandung sukasari sukasari"
-  },
-  {
-    "id": "3273020001",
-    "subdistrict": "Cidadap",
-    "district": "Cidadap",
-    "city": "Kota Bandung",
-    "province": "Jawa Barat",
-    "full_text": "jawa barat kota bandung cidadap cidadap"
+    "postal_code": "40151",
+    "full_text": "40151 jawa barat kota bandung sukasari sukasari",
+    "bps": {
+      "subdistrict": {"code": "3273010001", "name": "Sukasari"},
+      "district": {"code": "3273010", "name": "Sukasari"},
+      "city": {"code": "3273", "name": "Bandung"},
+      "province": {"code": "32", "name": "Jawa Barat"}
+    },
+    "scores": {
+      "fts": 6.82,
+      "subdistrict": 0.96,
+      "district": 0.94,
+      "city": 0.91,
+      "province": 0.88
+    }
   }
 ]
 ```
 
 ### Specific Search Endpoints
 
-In addition to the general search endpoint, the API provides specific search endpoints for each administrative level. All use Jaro-Winkler fuzzy matching (≥ 0.8), order by similarity, and return up to 10 results.
+In addition to the general search endpoint, the API provides specific search endpoints for each administrative level. All use Jaro-Winkler fuzzy matching (≥ 0.8), order by similarity, and return up to 10 results by default. They also honour the shared `limit`, `include_bps`, and `include_scores` toggles.
 
-- **District Search**: `/v1/search/district?q={district}&city={city}&province={province}`
+- **District Search**: `/v1/search/district?q={district}&city={city}&province={province}&limit={n}&include_bps={bool}&include_scores={bool}`
   - `q` is required; `city` and `province` are optional narrowing filters.
   - `city` matches both Kota and Kabupaten prefixes automatically.
 
-- **Subdistrict Search**: `/v1/search/subdistrict?q={subdistrict}&district={district}&city={city}&province={province}`
+- **Subdistrict Search**: `/v1/search/subdistrict?q={subdistrict}&district={district}&city={city}&province={province}&limit={n}&include_bps={bool}&include_scores={bool}`
   - `q` is required; `district`, `city`, and `province` are optional narrowing filters.
   - `city` matches both Kota and Kabupaten prefixes automatically.
 
-- **City Search**: `/v1/search/city?q={city}`
+- **City Search**: `/v1/search/city?q={city}&limit={n}&include_bps={bool}&include_scores={bool}`
   - `q` is required; matches both Kota and Kabupaten.
 
-- **Province Search**: `/v1/search/province?q={province}`
+- **Province Search**: `/v1/search/province?q={province}&limit={n}&include_bps={bool}&include_scores={bool}`
   - `q` is required.
 
 #### District Search Endpoint
 
 ```
-GET /v1/search/district?q={district}&city={city}&province={province}
+GET /v1/search/district?q={district}&city={city}&province={province}&limit={n}&include_bps={bool}&include_scores={bool}
 ```
 
 **Parameters:**
@@ -127,7 +144,7 @@ curl "http://localhost:8080/v1/search/district?q=Cidadap&city=Bandung&province=J
 #### Subdistrict Search Endpoint
 
 ```
-GET /v1/search/subdistrict?q={subdistrict}&district={district}&city={city}&province={province}
+GET /v1/search/subdistrict?q={subdistrict}&district={district}&city={city}&province={province}&limit={n}&include_bps={bool}&include_scores={bool}
 ```
 
 **Parameters:**
@@ -145,7 +162,7 @@ curl "http://localhost:8080/v1/search/subdistrict?q=Sukasari&district=Sukasari&c
 #### City Search Endpoint
 
 ```
-GET /v1/search/city?q={query}
+GET /v1/search/city?q={query}&limit={n}&include_bps={bool}&include_scores={bool}
 ```
 
 **Parameters:**
@@ -159,7 +176,7 @@ curl "http://localhost:8080/v1/search/city?q=bandung"
 #### Province Search Endpoint
 
 ```
-GET /v1/search/province?q={query}
+GET /v1/search/province?q={query}&limit={n}&include_bps={bool}&include_scores={bool}
 ```
 
 **Parameters:**
@@ -172,7 +189,7 @@ curl "http://localhost:8080/v1/search/province?q=jawa"
 #### Postal Code Search Endpoint
 
 ```
-GET /v1/search/postal/{postalCode}
+GET /v1/search/postal/{postalCode}?limit={n}&include_bps={bool}&include_scores={bool}
 ```
 
 **Parameters:**

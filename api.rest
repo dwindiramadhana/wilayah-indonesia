@@ -16,6 +16,12 @@ GET {{baseUrl}}/v1/search?q=bandung&province=Jawa%20Barat
 ### 2c. General search with only field filters (no q)
 GET {{baseUrl}}/v1/search?district=Cidadap&city=Bandung&province=Jawa%20Barat
 
+### 2d. General search requesting BPS metadata and scores
+GET {{baseUrl}}/v1/search?q=bandung&include_bps=true&include_scores=true&limit=5
+
+### 2e. General search using BPS terminology
+GET {{baseUrl}}/v1/search?q=kemayoran&search_bps=true&include_bps=true
+
 ### 3. District search endpoint with successful result
 GET {{baseUrl}}/v1/search/district?q=bandung
 
@@ -24,6 +30,9 @@ GET {{baseUrl}}/v1/search/district?q=bandung&city=bandung
 
 ### 3c. District search with city and province narrowing
 GET {{baseUrl}}/v1/search/district?q=bandung&city=bandung&province=jawa%20barat
+
+### 3d. District search with scoring and BPS metadata
+GET {{baseUrl}}/v1/search/district?q=bandung&city=bandung&include_scores=true&include_bps=true&limit=3
 
 ### 4. District search endpoint with no results
 GET {{baseUrl}}/v1/search/district?q=nonexistentdistrict123
@@ -36,6 +45,9 @@ GET {{baseUrl}}/v1/search/subdistrict?q=menteng&district=tebet
 
 ### 5c. Subdistrict search with district, city and province narrowing
 GET {{baseUrl}}/v1/search/subdistrict?q=menteng&district=tebet&city=jakarta%20selatan&province=dki%20jakarta
+
+### 5d. Subdistrict search with BPS metadata
+GET {{baseUrl}}/v1/search/subdistrict?q=menteng&include_bps=true&include_scores=true
 
 ### 6. Subdistrict search endpoint with no results
 GET {{baseUrl}}/v1/search/subdistrict?q=nonexistentsubdistrict123
@@ -56,7 +68,7 @@ GET {{baseUrl}}/v1/search/province?q=nonexistentprovince123
 GET {{baseUrl}}/v1/search
 
 ### 12. Postal code search endpoint with successful result
-GET {{baseUrl}}/v1/search/postal/12510
+GET {{baseUrl}}/v1/search/postal/12510?include_bps=true
 
 ### 13. Postal code search endpoint with invalid postal code format
 GET {{baseUrl}}/v1/search/postal/123

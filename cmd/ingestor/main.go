@@ -46,9 +46,13 @@ SELECT
 	   city.nama AS city,
 	   prov.nama AS province,
 	   bps_sub.nama_bps AS subdistrict_bps,
+	   bps_sub.kode_bps AS subdistrict_bps_code,
 	   bps_dist.nama_bps AS district_bps,
+	   bps_dist.kode_bps AS district_bps_code,
 	   bps_city.nama_bps AS city_bps,
+	   bps_city.kode_bps AS city_bps_code,
 	   bps_prov.nama_bps AS province_bps,
+	   bps_prov.kode_bps AS province_bps_code,
 	   kodepos.kodepos AS postal_code,
 	   LOWER(TRIM(CONCAT(
 	       COALESCE(CAST(kodepos.kodepos AS VARCHAR), ''), ' ',
@@ -115,6 +119,13 @@ LEFT JOIN regions AS r ON r.id = bw.kode_dagri;
 		log.Fatal("Failed to create BPS mapping table:", err)
 	}
 
+	_, err = db.Exec(`CREATE OR REPLACE TABLE regions_bps AS
+SELECT id, full_text_bps
+FROM regions;`)
+	if err != nil {
+		log.Fatal("Failed to create regions_bps table:", err)
+	}
+
 	// Clean up by dropping the raw wilayah table
 	_, err = db.Exec("DROP TABLE IF EXISTS wilayah;")
 	if err != nil {
@@ -137,10 +148,14 @@ LEFT JOIN regions AS r ON r.id = bw.kode_dagri;
 		log.Fatal("Failed to load FTS extension:", err)
 	}
 
-	// Create the FTS index on the 'full_text' column of the 'regions' table
+	// Create dedicated FTS indexes for Dagri and BPS corpora
 	_, err = db.Exec("PRAGMA create_fts_index('regions', 'id', 'full_text', overwrite=1);")
 	if err != nil {
 		log.Fatal("Failed to create FTS index:", err)
+	}
+	_, err = db.Exec("PRAGMA create_fts_index('regions_bps', 'id', 'full_text_bps', overwrite=1);")
+	if err != nil {
+		log.Fatal("Failed to create BPS FTS index:", err)
 	}
 
 	fmt.Println("Data ingestion and preparation completed successfully with postal codes and BPS mappings!")
