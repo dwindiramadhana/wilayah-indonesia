@@ -34,7 +34,7 @@ COPY --from=builder /app/regions-api .
 COPY --from=builder /app/data/regions.duckdb ./data/regions.duckdb
 
 # Expose port
-EXPOSE 8080
+EXPOSE 8000
 
 # Command to run the application
 CMD ["/app/regions-api"]

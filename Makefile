@@ -79,7 +79,7 @@ docker-build:
 # Run Docker container
 .PHONY: docker-run
 docker-run:
-	docker run   -p 8080:8080 $(BINARY)
+	docker run -p 8000:8000 -e PORT=8000 $(BINARY)
 
 # Help
 .PHONY: help
