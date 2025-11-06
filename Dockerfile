@@ -19,7 +19,7 @@ RUN go mod download
 COPY . .
 
 # Prepare DuckDB artifacts before building the binary
-RUN make prepare-db
+RUN DB_PATH="/app/data/regions.duckdb" make prepare-db
 
 # Build the binary with CGO enabled so DuckDB extensions can be loaded at runtime
 RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-w -s" -o regions-api ./cmd/api
