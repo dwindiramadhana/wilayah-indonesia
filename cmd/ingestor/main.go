@@ -18,8 +18,13 @@ func main() {
 	dataDir := os.Getenv("DATA_DIR")
 	paths := config.ResolveIngestionPaths(dataDir, config.IngestionPaths{})
 
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "md:regions"
+	}
+
 	opts := config.Options{
-		DBPath:    os.Getenv("DB_PATH"),
+		DBPath:    dbPath,
 		Ingestion: paths,
 		ReadOnly:  false,
 	}

@@ -13,9 +13,13 @@ func main() {
 	slog.SetDefault(bootstrapLogger)
 
 	ctx := context.Background()
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "md:regions"
+	}
 	opts := config.Options{
-		DBPath: os.Getenv("DB_PATH"),
-		Port:   os.Getenv("PORT"),
+		DBPath:   dbPath,
+		Port:     os.Getenv("PORT"),
 		ReadOnly: true,
 	}
 

@@ -3,9 +3,11 @@ package config
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -22,7 +24,7 @@ import (
 	ingestionusecase "github.com/ilmimris/wilayah-indonesia/internal/usecase/ingestion"
 	regionusecase "github.com/ilmimris/wilayah-indonesia/internal/usecase/region"
 
-	_ "github.com/marcboeker/go-duckdb/v2"
+	_ "github.com/duckdb/duckdb-go/v2"
 )
 
 // Options groups runtime configuration flags consumed by bootstrap routines.
@@ -73,6 +75,10 @@ func NewDuckDB(ctx context.Context, opts Options) (*sql.DB, error) {
 	if path == "" {
 		path = "data/regions.duckdb"
 	}
+	isMotherDuck := isMotherDuckPath(path)
+	if isMotherDuck {
+		ensureMotherDuckToken(path)
+	}
 	connStr := path
 	if opts.ReadOnly {
 		connStr = path + "?access_mode=read_only"
@@ -81,7 +87,77 @@ func NewDuckDB(ctx context.Context, opts Options) (*sql.DB, error) {
 	if err != nil {
 		return nil, sharederrors.Wrap(sharederrors.CodeDatabaseFailure, "failed to open database", err)
 	}
+	if isMotherDuck {
+		if err := useMotherDuckDatabase(ctx, conn, path); err != nil {
+			slog.Warn("Failed to select MotherDuck database", "db_path", path, "error", err)
+		}
+	}
 	return conn, nil
+}
+
+func ensureMotherDuckToken(path string) {
+	token, ok := os.LookupEnv("MOTHERDUCK_TOKEN")
+	if !ok || token == "" {
+		slog.Warn("MOTHERDUCK_TOKEN not set; MotherDuck connection may fail", "db_path", path)
+		return
+	}
+
+	if _, exists := os.LookupEnv("motherduck_token"); exists {
+		return
+	}
+
+	if err := os.Setenv("motherduck_token", token); err != nil {
+		slog.Warn("Failed to propagate MotherDuck token for DuckDB driver", "error", err)
+	}
+}
+
+func isMotherDuckPath(path string) bool {
+	return strings.HasPrefix(path, "md:") || strings.HasPrefix(path, "motherduck:")
+}
+
+func useMotherDuckDatabase(ctx context.Context, db *sql.DB, path string) error {
+	target := motherDuckDatabaseName(path)
+	if target == "" || target == "main" {
+		return nil
+	}
+	stmt := fmt.Sprintf("USE %s;", quoteIdentifier(target))
+	if _, err := db.ExecContext(ctx, stmt); err != nil {
+		return err
+	}
+	return nil
+}
+
+func normalizeMotherDuckPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if idx := strings.Index(path, "?"); idx != -1 {
+		path = path[:idx]
+	}
+	switch {
+	case strings.HasPrefix(path, "motherduck:"):
+		path = strings.TrimPrefix(path, "motherduck:")
+	case strings.HasPrefix(path, "md:"):
+		path = strings.TrimPrefix(path, "md:")
+	default:
+		return ""
+	}
+	return path
+}
+
+func quoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+func motherDuckDatabaseName(path string) string {
+	normalized := normalizeMotherDuckPath(path)
+	if normalized == "" {
+		return ""
+	}
+	if idx := strings.Index(normalized, "/"); idx != -1 {
+		return normalized[:idx]
+	}
+	return normalized
 }
 
 // NewFiber returns a basic Fiber app without middleware, ready for configuration.
@@ -92,7 +168,11 @@ func NewFiber() (*fiber.App, error) {
 
 // BootstrapHTTP wires HTTP components; future phases will connect repositories and use cases.
 func BootstrapHTTP(ctx context.Context, opts Options) (HTTPBootstrap, error) {
-	opts.ReadOnly = true
+	if !isMotherDuckPath(opts.DBPath) {
+		opts.ReadOnly = true
+	} else {
+		opts.ReadOnly = false
+	}
 	logger, err := NewLogger()
 	if err != nil {
 		return HTTPBootstrap{}, err

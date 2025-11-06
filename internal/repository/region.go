@@ -37,6 +37,7 @@ type RegionRepository interface {
 
 // RegionRepositoryCapabilities describes optional features surfaced by the data store.
 type RegionRepositoryCapabilities struct {
+	HasFTSIndex   bool
 	HasBPSColumns bool
 	HasBPSIndex   bool
 }

@@ -18,7 +18,10 @@ import (
 type RegionRepository struct {
 	db          *sql.DB
 	columns     map[string]bool
+	hasFTSIndex bool
 	hasBPSIndex bool
+	catalog     string
+	ftsSchemas  []string
 }
 
 // NewRegionRepository constructs a DuckDB-backed RegionRepository.
@@ -27,6 +30,10 @@ func NewRegionRepository(db *sql.DB) *RegionRepository {
 		slog.Warn("duckdb scalar subquery compatibility flag failed", "error", err)
 	}
 	repo := &RegionRepository{db: db, columns: make(map[string]bool)}
+	repo.detectCatalog()
+	if repo.catalog != "" {
+		slog.Info("duckdb catalog detected", "catalog", repo.catalog)
+	}
 	repo.loadSchemaColumns()
 	repo.detectFTSIndexes()
 	return repo
@@ -39,7 +46,7 @@ func (r *RegionRepository) Search(ctx context.Context, params repository.RegionS
 	query, args := r.buildSearchQuery(params)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, sharederrors.Wrap(sharederrors.CodeDatabaseFailure, "database query failed", err)
+		return nil, sharederrors.Wrap(sharederrors.CodeDatabaseFailure, err.Error(), err)
 	}
 	defer rows.Close()
 
@@ -88,6 +95,7 @@ func (r *RegionRepository) SearchByPostalCode(ctx context.Context, postalCode st
 // Capabilities reports optional dataset features available to callers.
 func (r *RegionRepository) Capabilities(ctx context.Context) (repository.RegionRepositoryCapabilities, error) {
 	return repository.RegionRepositoryCapabilities{
+		HasFTSIndex:   r.hasFTSIndex,
 		HasBPSColumns: r.hasColumn("subdistrict_bps") && r.hasColumn("province_bps"),
 		HasBPSIndex:   r.hasBPSIndex,
 	}, nil
@@ -121,28 +129,184 @@ func (r *RegionRepository) loadSchemaColumns() {
 }
 
 func (r *RegionRepository) detectFTSIndexes() {
+	if _, err := r.db.Exec("INSTALL fts;"); err != nil {
+		slog.Warn("duckdb fts extension install failed", "error", err)
+		return
+	}
+
+	if _, err := r.db.Exec("LOAD fts;"); err != nil {
+		slog.Warn("duckdb fts extension unavailable", "error", err)
+		return
+	}
+
+	if r.ensureFTSIndex("regions", "id", "full_text") {
+		r.hasFTSIndex = true
+	} else {
+		slog.Debug("duckdb regions FTS index missing")
+	}
+
 	if !r.hasColumn("full_text_bps") {
 		return
 	}
-	rows, err := r.db.Query("SELECT fts_main_regions_bps.match_bm25(id, '') FROM regions LIMIT 1")
-	if err != nil {
+
+	if r.ensureFTSIndex("regions_bps", "id", "full_text_bps") {
+		r.hasBPSIndex = true
+	} else {
+		slog.Debug("duckdb BPS FTS index missing")
+	}
+}
+
+func (r *RegionRepository) ensureFTSIndex(table, idColumn, textColumn string) bool {
+	schema := r.ftsSchema(table)
+	if r.ftsSchemaExists(schema) {
+		r.addFTSSchema(schema)
+		return true
+	}
+
+	createStmt := fmt.Sprintf("PRAGMA create_fts_index('%s', '%s', '%s', overwrite=1);", table, idColumn, textColumn)
+	if _, createErr := r.db.Exec(createStmt); createErr != nil {
+		slog.Warn("duckdb FTS index rebuild failed", "table", table, "error", createErr)
+		return false
+	}
+
+	if r.ftsSchemaExists(schema) {
+		r.addFTSSchema(schema)
+		slog.Info("duckdb FTS index ready", "table", table)
+		return true
+	}
+
+	slog.Warn("duckdb FTS index unavailable after rebuild", "table", table)
+	return false
+}
+
+func (r *RegionRepository) detectCatalog() {
+	row := r.db.QueryRow("SELECT current_database()")
+	var name string
+	if err := row.Scan(&name); err != nil {
 		return
 	}
-	rows.Close()
-	r.hasBPSIndex = true
+	if name != "" && name != "main" && name != "memory" {
+		r.catalog = name
+	}
+}
+
+func (r *RegionRepository) catalogPrefix() string {
+	if r.catalog == "" {
+		return ""
+	}
+	return r.catalog + "."
+}
+
+func (r *RegionRepository) ftsSchema(table string) string {
+	return fmt.Sprintf("fts_main_%s", table)
+}
+
+func (r *RegionRepository) ftsSchemaExists(schema string) bool {
+	var count int
+	query := `
+SELECT COUNT(*)
+FROM information_schema.tables
+WHERE table_schema = ?`
+	var err error
+	if r.catalog != "" {
+		query += " AND table_catalog = ?"
+		err = r.db.QueryRow(query, schema, r.catalog).Scan(&count)
+	} else {
+		err = r.db.QueryRow(query, schema).Scan(&count)
+	}
+	if err != nil {
+		slog.Debug("duckdb FTS schema lookup failed", "schema", schema, "error", err)
+		return false
+	}
+	return count > 0
+}
+
+func sqlQuoteLiteral(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func (r *RegionRepository) addFTSSchema(schema string) {
+	for _, existing := range r.ftsSchemas {
+		if existing == schema {
+			return
+		}
+	}
+	r.ftsSchemas = append(r.ftsSchemas, schema)
+	r.configureSearchPath()
+}
+
+func (r *RegionRepository) configureSearchPath() {
+	baseSchemas := make([]string, 0, len(r.ftsSchemas)+2)
+	if r.catalog != "" {
+		baseSchemas = append(baseSchemas, fmt.Sprintf("%s.main", r.catalog))
+	} else {
+		baseSchemas = append(baseSchemas, "main")
+	}
+	for _, schema := range r.ftsSchemas {
+		if r.catalog != "" {
+			baseSchemas = append(baseSchemas, fmt.Sprintf("%s.%s", r.catalog, schema))
+		} else {
+			baseSchemas = append(baseSchemas, schema)
+		}
+	}
+	items := make([]string, 0, len(baseSchemas))
+	seen := make(map[string]struct{}, len(baseSchemas))
+	for _, schema := range baseSchemas {
+		if schema == "" {
+			continue
+		}
+		if _, ok := seen[schema]; ok {
+			continue
+		}
+		seen[schema] = struct{}{}
+		items = append(items, schema)
+	}
+	if len(items) == 0 {
+		return
+	}
+	stmt := fmt.Sprintf("SET search_path=%s;", sqlQuoteLiteral(strings.Join(items, ",")))
+	if _, err := r.db.Exec(stmt); err != nil {
+		slog.Debug("duckdb search_path update failed", "statement", stmt, "error", err)
+	} else {
+		slog.Info("duckdb search_path configured", "value", strings.Join(items, ","))
+	}
+}
+
+func (r *RegionRepository) ftsFunction(table string) string {
+	return fmt.Sprintf("%s.match_bm25", r.ftsSchema(table))
 }
 
 func (r *RegionRepository) buildSearchQuery(params repository.RegionSearchParams) (string, []interface{}) {
-	ftsIndex := "fts_main_regions"
-	if params.Options.SearchBPS {
-		ftsIndex = "fts_main_regions_bps"
+	queryTrimmed := strings.TrimSpace(params.Query)
+	queryEmpty := queryTrimmed == ""
+	ftsLiteral := sqlQuoteLiteral(queryTrimmed)
+
+	useBPS := params.Options.SearchBPS
+	var useFTS bool
+	ftsFunc := r.ftsFunction("regions")
+	if useBPS {
+		ftsFunc = r.ftsFunction("regions_bps")
+		useFTS = r.hasBPSIndex
+	} else {
+		useFTS = r.hasFTSIndex
+	}
+	if queryEmpty {
+		useFTS = false
 	}
 
 	args := make([]interface{}, 0, 32)
-	queryTrimmed := strings.TrimSpace(params.Query)
+	whereClauses := make([]string, 0, 5)
+	whereArgs := make([]interface{}, 0, 5)
 
-	ftsScoreExpr := fmt.Sprintf("CASE WHEN ? <> '' THEN %s.match_bm25(r.id, ?) ELSE NULL END AS fts_score", ftsIndex)
-	args = append(args, queryTrimmed, queryTrimmed)
+	computedColumns := make([]string, 0, 5)
+	if useFTS {
+		computedColumns = append(computedColumns, fmt.Sprintf("CASE WHEN ? <> '' THEN %s(r.id, %s) ELSE NULL END AS fts_score", ftsFunc, ftsLiteral))
+		args = append(args, queryTrimmed)
+		whereClauses = append(whereClauses, "(? = '' OR fts_score IS NOT NULL)")
+		whereArgs = append(whereArgs, queryTrimmed)
+	} else {
+		computedColumns = append(computedColumns, "NULL AS fts_score")
+	}
 
 	subdistrictExpr := "r.subdistrict"
 	districtExpr := "r.district"
@@ -150,7 +314,7 @@ func (r *RegionRepository) buildSearchQuery(params repository.RegionSearchParams
 	cityScoreExpr := "CASE WHEN ? <> '' THEN GREATEST(jaro_winkler_similarity(r.city, 'Kota ' || ?), jaro_winkler_similarity(r.city, 'Kabupaten ' || ?)) ELSE NULL END AS city_score"
 	cityArgsCount := 3
 
-	if params.Options.SearchBPS {
+	if useBPS {
 		subdistrictExpr = "COALESCE(r.subdistrict_bps, r.subdistrict)"
 		districtExpr = "COALESCE(r.district_bps, r.district)"
 		provinceExpr = "COALESCE(r.province_bps, r.province)"
@@ -159,19 +323,30 @@ func (r *RegionRepository) buildSearchQuery(params repository.RegionSearchParams
 		cityArgsCount = 2
 	}
 
-	computedColumns := []string{ftsScoreExpr,
+	computedColumns = append(computedColumns,
 		fmt.Sprintf("CASE WHEN ? <> '' THEN jaro_winkler_similarity(%s, ?) ELSE NULL END AS subdistrict_score", subdistrictExpr),
 		fmt.Sprintf("CASE WHEN ? <> '' THEN jaro_winkler_similarity(%s, ?) ELSE NULL END AS district_score", districtExpr),
 		cityScoreExpr,
 		fmt.Sprintf("CASE WHEN ? <> '' THEN jaro_winkler_similarity(%s, ?) ELSE NULL END AS province_score", provinceExpr),
-	}
+	)
 
 	args = append(args, params.Subdistrict, params.Subdistrict)
+	whereClauses = append(whereClauses, "(? = '' OR subdistrict_score >= 0.8)")
+	whereArgs = append(whereArgs, params.Subdistrict)
+
 	args = append(args, params.District, params.District)
+	whereClauses = append(whereClauses, "(? = '' OR district_score >= 0.8)")
+	whereArgs = append(whereArgs, params.District)
+
 	for i := 0; i < cityArgsCount; i++ {
 		args = append(args, params.City)
 	}
+	whereClauses = append(whereClauses, "(? = '' OR city_score >= 0.8)")
+	whereArgs = append(whereArgs, params.City)
+
 	args = append(args, params.Province, params.Province)
+	whereClauses = append(whereClauses, "(? = '' OR province_score >= 0.8)")
+	whereArgs = append(whereArgs, params.Province)
 
 	baseColumns := []string{
 		"r.id",
@@ -229,19 +404,16 @@ func (r *RegionRepository) buildSearchQuery(params repository.RegionSearchParams
 	outerColumns = append(outerColumns, "fts_score", "subdistrict_score", "district_score", "city_score", "province_score")
 
 	builder.WriteString(strings.Join(outerColumns, ",\n\t"))
-	builder.WriteString("\nFROM scored\nWHERE\n\t")
-	whereClauses := []string{
-		"(? = '' OR fts_score IS NOT NULL)",
-		"(? = '' OR subdistrict_score >= 0.8)",
-		"(? = '' OR district_score >= 0.8)",
-		"(? = '' OR city_score >= 0.8)",
-		"(? = '' OR province_score >= 0.8)",
+	builder.WriteString("\nFROM scored")
+	if len(whereClauses) > 0 {
+		builder.WriteString("\nWHERE\n\t")
+		builder.WriteString(strings.Join(whereClauses, "\n\tAND "))
 	}
-	builder.WriteString(strings.Join(whereClauses, "\n\tAND "))
 	builder.WriteString("\nORDER BY\n\t(COALESCE(fts_score, 0) + COALESCE(subdistrict_score, 0) + COALESCE(district_score, 0) + COALESCE(city_score, 0) + COALESCE(province_score, 0)) DESC\n")
 	builder.WriteString("LIMIT ?")
 
-	args = append(args, queryTrimmed, params.Subdistrict, params.District, params.City, params.Province, params.Options.Limit)
+	args = append(args, whereArgs...)
+	args = append(args, params.Options.Limit)
 
 	return builder.String(), args
 }
