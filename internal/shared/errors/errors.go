@@ -15,6 +15,8 @@ const (
 	CodeNotFound Code = "NOT_FOUND"
 	// CodeDatabaseFailure captures unexpected datastore errors.
 	CodeDatabaseFailure Code = "DATABASE_FAILURE"
+	// CodeConfiguration signals that configuration is missing or invalid.
+	CodeConfiguration Code = "CONFIGURATION_ERROR"
 	// CodeNotImplemented represents functionality that has not been wired yet.
 	CodeNotImplemented Code = "NOT_IMPLEMENTED"
 )

@@ -1,6 +1,6 @@
 # Indonesian Regions Fuzzy Search API
 
-A high-performance, dependency-free Go API for fuzzy searching Indonesian administrative regions using DuckDB. This service provides fast and accurate search capabilities for Indonesian provinces, cities, districts, and subdistricts.
+A high-performance Go API for fuzzy searching Indonesian administrative regions. Supports both **DuckDB** (lightweight, embedded) and **PostgreSQL** (production-ready with native FTS and vector embeddings). This service provides fast and accurate search capabilities for Indonesian provinces, cities, districts, and subdistricts.
 
 ## Table of Contents
 
@@ -25,25 +25,27 @@ A high-performance, dependency-free Go API for fuzzy searching Indonesian admini
 
 ## Features
 
-- **BM25 Full-Text Search**: Utilizes DuckDB's `match_bm25` for fast and relevant full-text search across all administrative levels.
+- **DuckDB Backend**: Lightweight, embedded database for fast querying with zero external dependencies.
+- **PostgreSQL Backend**: Production-ready with native full-text search (tsvector/tsquery), pgvector embeddings support, and fuzzystrmatch for Jaro-Winkler similarity.
+- **BM25 Full-Text Search** (DuckDB): Utilizes DuckDB's `match_bm25` for fast and relevant full-text search across all administrative levels.
+- **Native FTS** (PostgreSQL): Uses tsvector/tsquery with GIN indexes for optimized full-text search with ranking.
 - **Fuzzy Search**: Employs the Jaro-Winkler similarity algorithm for typo-tolerant searches on specific administrative levels (province, city, district, subdistrict).
 - **BPS Integration**: Optionally search and respond with official BPS (Badan Pusat Statistik) codes and names.
-- **High Performance**: Powered by DuckDB for fast querying of Indonesian administrative data.
-- **Lightweight**: Minimal dependencies with the GoFiber web framework.
-- **Container Ready**: Dockerized application for easy deployment.
+- **High Performance**: Powered by DuckDB or PostgreSQL with optimized indexes for fast querying of Indonesian administrative data.
+- **Container Ready**: Docker and Docker Compose support for easy deployment.
 - **Clean Architecture**: Delivery, use case, repository, and gateway layers are isolated to keep business rules portable.
-- **Configurable**: Environment-based configuration for port, database path, and ingestion data directory.
+- **Configurable**: Environment-based configuration for database backend, port, and ingestion data directory.
 
 ## Architecture Overview
 
 The codebase follows a Clean Architecture layout:
 
 - `cmd/api`, `cmd/ingestor` – binary entrypoints that delegate to internal bootstrappers.
-- `internal/config` – central wiring for loggers, DuckDB connections, Fiber apps, and use cases.
+- `internal/config` – central wiring for loggers, database connections (DuckDB/PostgreSQL), Fiber apps, and use cases.
 - `internal/delivery/http` – Fiber controllers, routes, and middleware for the public API.
 - `internal/delivery/worker` – CLI-facing delivery adapter that runs dataset refresh workflows.
 - `internal/usecase` – business rules for region search and dataset ingestion.
-- `internal/repository/duckdb` – data-access implementations and administrative helpers for DuckDB.
+- `internal/repository` – data-access implementations for DuckDB (`duckdb/`) and PostgreSQL (`postgres/`).
 - `internal/gateway` – filesystem loader and SQL normalizer abstractions used by the ingestion flow.
 - `internal/shared` – cross-cutting concerns such as error taxonomy.
 
@@ -263,21 +265,37 @@ The application can be configured using the following environment variables:
 
 | Variable | Description | Default Value |
 |----------|-------------|---------------|
+| `DB_TYPE` | Database backend: `duckdb` or `postgres` | `duckdb` |
+| `DATABASE_URL` | PostgreSQL connection string (required when `DB_TYPE=postgres`) | - |
 | `PORT` | Port for the API server to listen on | `8080` |
 | `DB_PATH` | Path to the DuckDB database file. The API opens it read-only; the ingestor opens it read-write. | `data/regions.duckdb` |
 | `DATA_DIR` | Base directory containing SQL dumps used by the ingestor (`wilayah.sql`, `wilayah_kodepos.sql`, `bps_wilayah.sql`) | `data/` |
 
+### PostgreSQL Connection String Format
+
+When using PostgreSQL, set `DATABASE_URL` in the following format:
+
+```
+postgres://user:password@host:port/database?sslmode=disable
+```
+
+For local development with Docker Compose:
+
+```
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/wilayah_indonesia?sslmode=disable
+```
+
 ## Quick Start
 
-### Prerequisites
+### DuckDB (Lightweight, Default)
+
+#### Prerequisites
 
 - Go 1.21 or higher
 - curl (for downloading data)
 - Docker (optional, for containerized deployment)
 
-### Using Makefile
-
-The easiest way to get started is by using the provided Makefile:
+#### Using Makefile
 
 ```bash
 # Download the administrative data and prepare the database
@@ -287,7 +305,49 @@ make prepare-db
 make run
 ```
 
+### PostgreSQL (Production-Ready with Native FTS)
+
+#### Prerequisites
+
+- Docker and Docker Compose
+- Go 1.21 or higher (for local development)
+
+#### Using Docker Compose (Recommended)
+
+```bash
+# Start PostgreSQL container
+make postgres-up
+
+# Run database migrations (creates extensions and tables)
+make migrate
+
+# Seed the database with administrative data
+make seed
+
+# The API is now running at http://localhost:8000
+```
+
+#### Local Development with PostgreSQL
+
+```bash
+# Start PostgreSQL (requires Docker)
+docker compose up -d postgres
+
+# Wait for PostgreSQL to be healthy, then run migrations
+make migrate
+
+# Seed the database
+make seed
+
+# Run API server with PostgreSQL backend
+DB_TYPE=postgres DATABASE_URL=postgres://postgres:postgres@localhost:5432/wilayah_indonesia make run
+```
+
 ### Manual Build and Run
+
+### Manual Build and Run
+
+#### DuckDB Setup
 
 1. **Download the data:**
    ```bash
@@ -304,7 +364,27 @@ make run
    go run ./cmd/api/main.go
    ```
 
+#### PostgreSQL Setup
+
+1. **Start PostgreSQL and run migrations:**
+   ```bash
+   docker compose up -d postgres
+   make migrate
+   ```
+
+2. **Seed the database:**
+   ```bash
+   DB_TYPE=postgres go run ./cmd/ingestor/main.go
+   ```
+
+3. **Run the API server:**
+   ```bash
+   DB_TYPE=postgres DATABASE_URL=postgres://postgres:postgres@localhost:5432/wilayah_indonesia go run ./cmd/api/main.go
+   ```
+
 ### Using Docker
+
+#### DuckDB (Legacy)
 
 1. **Build the Docker image:**
    ```bash
@@ -315,6 +395,33 @@ make run
    ```bash
    docker run -p 8080:8080 regions-api
    ```
+
+#### PostgreSQL (Recommended for Production)
+
+1. **Start PostgreSQL and run migrations:**
+   ```bash
+   docker compose up -d postgres
+   make migrate
+   make seed
+   ```
+
+2. **Build and run API with PostgreSQL backend:**
+   ```bash
+   DB_TYPE=postgres docker build -t regions-api --build-arg DB_TYPE=postgres .
+   docker run -p 8000:8000 \
+     -e DB_TYPE=postgres \
+     -e DATABASE_URL=postgres://postgres:postgres@postgres:5432/wilayah_indonesia \
+     regions-api
+   ```
+
+**Using Docker Compose (Simplest):**
+```bash
+# Development
+docker compose up
+
+# Production (uses docker-compose.prod.yml)
+docker compose -f docker-compose.prod.yml up
+```
 
 ## Deployment
 
@@ -413,16 +520,40 @@ This process will:
 
 ## Makefile Commands
 
+### DuckDB Commands
+
 | Command | Description |
 |---------|-------------|
 | `make prepare-db` | Download data and run ingestor (recommended for first run) |
-| `make run` | Run the API server |
+| `make run` | Run the API server on port 8080 |
 | `make ingest` | Run the data ingestor |
 | `make download-data` | Download the SQL data file |
 | `make build` | Build the API binary |
-| `make docker-build` | Build Docker image |
+
+### PostgreSQL Commands
+
+| Command | Description |
+|---------|-------------|
+| `make postgres-up` | Start PostgreSQL container |
+| `make postgres-down` | Stop PostgreSQL container |
+| `make migrate` | Run all SQL migrations in order |
+| `make seed` | Run ingestor to seed database with data |
+| `make run-postgres` | Run API server with PostgreSQL backend |
+
+### Docker Commands
+
+| Command | Description |
+|---------|-------------|
+| `make docker-build` | Build Docker image (PostgreSQL target) |
 | `make docker-run` | Run Docker container |
-| `make test` | Run tests |
+| `make docker-compose-up` | Start all services with Docker Compose |
+
+### Utility Commands
+
+| Command | Description |
+|---------|-------------|
+| `make test` | Run unit tests |
+| `make test-integration` | Run PostgreSQL integration tests (requires PostgreSQL) |
 | `make clean` | Clean build artifacts |
 | `make deps` | Install dependencies |
 | `make help` | Show help message |
@@ -440,10 +571,28 @@ We would like to express our gratitude to [cahyadsn](https://github.com/cahyadsn
 │   └── ingestor/     # Data ingestion script
 ├── data/
 │   ├── regions.duckdb # DuckDB database file (generated)
-│   └── wilayah.sql   # Raw SQL data file (downloaded)
+│   └── *.sql         # Raw SQL data files (downloaded)
 ├── internal/
-│   └── api/          # API handlers and routing
-├── Dockerfile        # Docker configuration
+│   ├── config/       # Application bootstrapping and configuration
+│   ├── delivery/
+│   │   ├── http/     # HTTP handlers, routers, middleware
+│   │   └── worker/   # CLI worker for ingestion workflows
+│   ├── gateway/      # Filesystem loader, SQL normalizer
+│   ├── model/        # Domain models and DTOs
+│   ├── repository/
+│   │   ├── duckdb/   # DuckDB repository implementations
+│   │   └── postgres/ # PostgreSQL repository implementations
+│   ├── shared/       # Cross-cutting concerns (errors, etc.)
+│   └── usecase/      # Business logic (region search, ingestion)
+├── migrations/       # PostgreSQL migration scripts
+│   ├── 001_enable_extensions.sql
+│   ├── 002_create_regions_table.sql
+│   ├── 003_create_fts_indexes.sql
+│   └── 004_add_vector_embeddings.sql
+├── docker-compose.yml       # Development Docker Compose
+├── docker-compose.prod.yml  # Production Docker Compose
+├── Dockerfile        # Multi-stage Docker build
 ├── Makefile          # Build and run commands
 ├── go.mod            # Go module file
 └── go.sum            # Go checksum file
+```

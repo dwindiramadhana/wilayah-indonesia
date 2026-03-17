@@ -1,0 +1,89 @@
+version: '3.8'
+
+# Run both DuckDB and PostgreSQL backends simultaneously for comparison testing
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: wilayah-indonesia-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: wilayah_indonesia
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wilayah-network
+    ports:
+      - "5432:5432"
+
+  # API with PostgreSQL backend (port 8001)
+  api-postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DB_TYPE: postgres
+    container_name: wilayah-indonesia-api-pg
+    restart: unless-stopped
+    environment:
+      DB_TYPE: postgres
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/wilayah_indonesia?sslmode=disable
+      PORT: 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - wilayah-network
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API with DuckDB backend (port 8081)
+  api-duckdb:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DB_TYPE: duckdb
+    container_name: wilayah-indonesia-api-duckdb
+    restart: unless-stopped
+    environment:
+      DB_TYPE: duckdb
+      DB_PATH: /app/data/regions.duckdb
+      PORT: 8080
+      DATA_DIR: /app/data
+    volumes:
+      - duckdb_data:/app/data
+      - ./data:/app/data:ro
+    networks:
+      - wilayah-network
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+  duckdb_data:
+    driver: local
+
+networks:
+  wilayah-network:
+    driver: bridge

@@ -19,7 +19,9 @@ import (
 	"github.com/ilmimris/wilayah-indonesia/internal/gateway/filesystem"
 	"github.com/ilmimris/wilayah-indonesia/internal/gateway/sqlnormalize"
 	"github.com/ilmimris/wilayah-indonesia/internal/model"
+	"github.com/ilmimris/wilayah-indonesia/internal/repository"
 	"github.com/ilmimris/wilayah-indonesia/internal/repository/duckdb"
+	"github.com/ilmimris/wilayah-indonesia/internal/repository/postgres"
 	sharederrors "github.com/ilmimris/wilayah-indonesia/internal/shared/errors"
 	ingestionusecase "github.com/ilmimris/wilayah-indonesia/internal/usecase/ingestion"
 	regionusecase "github.com/ilmimris/wilayah-indonesia/internal/usecase/region"
@@ -29,11 +31,13 @@ import (
 
 // Options groups runtime configuration flags consumed by bootstrap routines.
 type Options struct {
-	DBPath    string
-	Port      string
-	Features  FeatureFlags
-	Ingestion IngestionPaths
-	ReadOnly  bool
+	DBType      string // "duckdb" or "postgres"
+	DBPath      string // For DuckDB
+	DatabaseURL string // For PostgreSQL
+	Port        string
+	Features    FeatureFlags
+	Ingestion   IngestionPaths
+	ReadOnly    bool
 }
 
 // FeatureFlags exposes optional toggles used across the application.
@@ -60,6 +64,7 @@ type HTTPBootstrap struct {
 type WorkerBootstrap struct {
 	Logger  *slog.Logger
 	DB      *sql.DB
+	PgPool  *postgres.Pool
 	Runner  *workerdelivery.Runner
 	UseCase ingestionusecase.UseCase
 }
@@ -93,6 +98,24 @@ func NewDuckDB(ctx context.Context, opts Options) (*sql.DB, error) {
 		}
 	}
 	return conn, nil
+}
+
+// NewPostgresPool creates a PostgreSQL connection pool.
+func NewPostgresPool(ctx context.Context, opts Options) (*postgres.Pool, error) {
+	dsn := opts.DatabaseURL
+	if dsn == "" {
+		dsn = os.Getenv("DATABASE_URL")
+	}
+	if dsn == "" {
+		return nil, sharederrors.Wrap(sharederrors.CodeConfiguration, "DATABASE_URL or DatabaseURL is required for PostgreSQL", nil)
+	}
+
+	pool, err := postgres.NewPool(ctx, dsn)
+	if err != nil {
+		return nil, sharederrors.Wrap(sharederrors.CodeDatabaseFailure, "failed to create PostgreSQL pool", err)
+	}
+
+	return pool, nil
 }
 
 func ensureMotherDuckToken(path string) {
@@ -166,33 +189,70 @@ func NewFiber() (*fiber.App, error) {
 	return app, nil
 }
 
-// BootstrapHTTP wires HTTP components; future phases will connect repositories and use cases.
+// BootstrapHTTP wires HTTP components; supports both DuckDB and PostgreSQL backends.
 func BootstrapHTTP(ctx context.Context, opts Options) (HTTPBootstrap, error) {
-	if !isMotherDuckPath(opts.DBPath) {
-		opts.ReadOnly = true
-	} else {
-		opts.ReadOnly = false
-	}
 	logger, err := NewLogger()
 	if err != nil {
 		return HTTPBootstrap{}, err
 	}
 
-	db, err := NewDuckDB(ctx, opts)
-	if err != nil {
-		return HTTPBootstrap{}, err
+	var db *sql.DB
+	var pgPool *postgres.Pool
+
+	// Default to DuckDB if not specified
+	dbType := opts.DBType
+	if dbType == "" {
+		dbType = "duckdb"
 	}
 
-	repo := duckdb.NewRegionRepository(db)
+	switch dbType {
+	case "postgres", "postgresql":
+		pgPool, err = NewPostgresPool(ctx, opts)
+		if err != nil {
+			return HTTPBootstrap{}, err
+		}
+		// Wrap sql.DB for compatibility
+		db = nil // PostgreSQL uses pgPool directly
+	case "duckdb":
+		fallthrough
+	default:
+		if !isMotherDuckPath(opts.DBPath) {
+			opts.ReadOnly = true
+		} else {
+			opts.ReadOnly = false
+		}
+		db, err = NewDuckDB(ctx, opts)
+		if err != nil {
+			return HTTPBootstrap{}, err
+		}
+	}
+
+	var repo repository.RegionRepository
+	if pgPool != nil {
+		repo = postgres.NewRegionRepository(pgPool)
+	} else {
+		repo = duckdb.NewRegionRepository(db)
+	}
+
 	uc, err := regionusecase.New(ctx, repo, regionusecase.RegionUseCaseOptions{Logger: logger})
 	if err != nil {
-		db.Close()
+		if db != nil {
+			db.Close()
+		}
+		if pgPool != nil {
+			pgPool.Close()
+		}
 		return HTTPBootstrap{}, err
 	}
 
 	app, err := NewFiber()
 	if err != nil {
-		db.Close()
+		if db != nil {
+			db.Close()
+		}
+		if pgPool != nil {
+			pgPool.Close()
+		}
 		return HTTPBootstrap{}, err
 	}
 
@@ -206,7 +266,13 @@ func BootstrapHTTP(ctx context.Context, opts Options) (HTTPBootstrap, error) {
 	app.Get("/healthz", func(c *fiber.Ctx) error {
 		ctx, cancel := context.WithTimeout(c.Context(), 2*time.Second)
 		defer cancel()
-		if err := db.PingContext(ctx); err != nil {
+		var pingErr error
+		if pgPool != nil {
+			pingErr = pgPool.Ping(ctx)
+		} else {
+			pingErr = db.PingContext(ctx)
+		}
+		if pingErr != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(model.ErrorResponse{Error: "Database connection failed"})
 		}
 		return c.JSON(fiber.Map{"status": "ok", "message": "Service is healthy"})
@@ -223,12 +289,31 @@ func BootstrapWorker(ctx context.Context, opts Options) (WorkerBootstrap, error)
 		return WorkerBootstrap{}, err
 	}
 
-	db, err := NewDuckDB(ctx, opts)
-	if err != nil {
-		return WorkerBootstrap{}, err
+	// Default to DuckDB if not specified
+	dbType := opts.DBType
+	if dbType == "" {
+		dbType = "duckdb"
 	}
 
-	adminRepo := duckdb.NewAdminRepository(db)
+	var db *sql.DB
+	var pgPool *postgres.Pool
+	var adminRepo ingestionusecase.AdminRepository
+
+	switch dbType {
+	case "postgres", "postgresql":
+		pgPool, err = NewPostgresPool(ctx, opts)
+		if err != nil {
+			return WorkerBootstrap{}, err
+		}
+		adminRepo = postgres.NewAdminRepository(pgPool)
+	default:
+		db, err = NewDuckDB(ctx, opts)
+		if err != nil {
+			return WorkerBootstrap{}, err
+		}
+		adminRepo = duckdb.NewAdminRepository(db)
+	}
+
 	loader := filesystem.FileLoader{}
 	normalizer := sqlnormalize.MySQLStripper{}
 	uc := ingestionusecase.New(loader, normalizer, adminRepo, ingestionusecase.Options{Logger: logger})
@@ -237,6 +322,7 @@ func BootstrapWorker(ctx context.Context, opts Options) (WorkerBootstrap, error)
 	return WorkerBootstrap{
 		Logger:  logger,
 		DB:      db,
+		PgPool:  pgPool,
 		Runner:  runner,
 		UseCase: uc,
 	}, nil

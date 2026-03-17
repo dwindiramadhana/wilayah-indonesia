@@ -13,14 +13,26 @@ func main() {
 	slog.SetDefault(bootstrapLogger)
 
 	ctx := context.Background()
+
+	// Database configuration
+	dbType := os.Getenv("DB_TYPE")
+	if dbType == "" {
+		dbType = "duckdb" // Default to DuckDB for backwards compatibility
+	}
+
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
-		dbPath = "md:regions"
+		if dbType == "duckdb" {
+			dbPath = "md:regions"
+		}
 	}
+
 	opts := config.Options{
-		DBPath:   dbPath,
-		Port:     os.Getenv("PORT"),
-		ReadOnly: true,
+		DBType:      dbType,
+		DBPath:      dbPath,
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		Port:        os.Getenv("PORT"),
+		ReadOnly:    dbType != "postgres", // PostgreSQL is always read-write
 	}
 
 	bootstrap, err := config.BootstrapHTTP(ctx, opts)
@@ -28,7 +40,12 @@ func main() {
 		slog.Error("Failed to bootstrap HTTP application", "error", err)
 		os.Exit(1)
 	}
-	defer bootstrap.DB.Close()
+
+	defer func() {
+		if bootstrap.DB != nil {
+			bootstrap.DB.Close()
+		}
+	}()
 
 	if bootstrap.Logger != nil {
 		slog.SetDefault(bootstrap.Logger)
@@ -39,7 +56,7 @@ func main() {
 		port = "8080"
 	}
 
-	slog.Info("Server starting", "port", port)
+	slog.Info("Server starting", "port", port, "db_type", dbType)
 	if err := bootstrap.App.Listen(":" + port); err != nil {
 		slog.Error("Failed to start server", "error", err)
 		os.Exit(1)
