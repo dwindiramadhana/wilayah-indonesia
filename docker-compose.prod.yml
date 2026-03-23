@@ -11,7 +11,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-wilayah_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: wilayah_indonesia
+      POSTGRES_DB: ${POSTGRES_DB:-wilayah_indonesia}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d:ro
