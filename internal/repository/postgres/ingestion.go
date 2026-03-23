@@ -63,6 +63,7 @@ func (uc *IngestionUseCase) Refresh(ctx context.Context, opts ingestionusecase.R
 		{"clear regions table", "TRUNCATE regions;"},
 		{"denormalize wilayah dataset", denormalizeQuery},
 		{"update full_text column", "UPDATE regions SET full_text = full_text WHERE id IS NOT NULL;"},
+		{"populate full_text_vector", populateFullTextVectorQuery},
 		{"create FTS index", createFTSIndexQuery},
 		{"drop raw wilayah table", "DROP TABLE IF EXISTS wilayah;"},
 		{"drop postal table", "DROP TABLE IF EXISTS wilayah_kodepos;"},
@@ -120,6 +121,13 @@ CREATE TABLE IF NOT EXISTS regions (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+`
+
+const populateFullTextVectorQuery = `
+-- Populate full_text_vector column with tsvector data
+UPDATE regions 
+SET full_text_vector = to_tsvector('simple', COALESCE(full_text, ''))
+WHERE full_text IS NOT NULL;
 `
 
 const denormalizeQuery = `
