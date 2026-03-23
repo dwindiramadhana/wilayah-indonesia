@@ -42,7 +42,7 @@ services:
     networks:
       - wilayah-network
     ports:
-      - "8000:8000"
+      - "8083:8000"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/healthz"]
       interval: 30s
