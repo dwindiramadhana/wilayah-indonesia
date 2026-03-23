@@ -200,6 +200,20 @@ func (r *RegionRepository) buildSearchQuery(params repository.RegionSearchParams
 		computedColumns = append(computedColumns, "NULL::double precision AS query_similarity_score")
 	}
 
+	// Add exact match boost for district and subdistrict
+	if !queryEmpty {
+		computedColumns = append(computedColumns, `
+			CASE 
+				WHEN LOWER(district) = LOWER(?) THEN 1.0
+				WHEN LOWER(subdistrict) = LOWER(?) THEN 0.8
+				WHEN LOWER(city) = LOWER(?) THEN 0.6
+				ELSE 0.0
+			END AS exact_match_boost`)
+		args = append(args, queryTrimmed, queryTrimmed, queryTrimmed)
+	} else {
+		computedColumns = append(computedColumns, "0.0 AS exact_match_boost")
+	}
+
 	subdistrictExpr := "subdistrict"
 	districtExpr := "district"
 	provinceExpr := "province"
@@ -313,7 +327,7 @@ func (r *RegionRepository) buildSearchQuery(params repository.RegionSearchParams
 		// Join WHERE clauses - all ? placeholders will be converted below
 		builder.WriteString(strings.Join(whereClauses, "\n\tOR "))
 	}
-	builder.WriteString("\nORDER BY\n\t(COALESCE(fts_score, 0) + COALESCE(query_similarity_score, 0) + COALESCE(subdistrict_score, 0) + COALESCE(district_score, 0) + COALESCE(city_score, 0) + COALESCE(province_score, 0)) DESC\n")
+	builder.WriteString("\nORDER BY\n\t(exact_match_boost * 10 + COALESCE(fts_score, 0) + COALESCE(query_similarity_score, 0) + COALESCE(subdistrict_score, 0) + COALESCE(district_score, 0) + COALESCE(city_score, 0) + COALESCE(province_score, 0)) DESC\n")
 
 	// Add limit argument and convert all ? placeholders
 	allArgs = append(allArgs, params.Options.Limit)
