@@ -51,6 +51,7 @@ WORKDIR /app
 COPY --from=builder /app/regions-api .
 COPY --from=builder /app/regions-ingestor .
 COPY --from=builder /app/migrations ./migrations
+COPY data/ ./data/
 
 # Expose port
 EXPOSE 8000
