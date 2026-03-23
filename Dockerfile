@@ -26,6 +26,14 @@ RUN go mod download
 # Copy source code
 COPY . .
 
+# Download data files for PostgreSQL backend
+RUN if [ "$DB_TYPE" = "postgres" ]; then \
+        mkdir -p data && \
+        curl -o data/wilayah.sql https://raw.githubusercontent.com/cahyadsn/wilayah/master/db/wilayah.sql && \
+        curl -o data/wilayah_kodepos.sql https://raw.githubusercontent.com/cahyadsn/wilayah_kodepos/refs/heads/main/db/wilayah_kodepos.sql && \
+        curl -o data/bps_wilayah.sql https://raw.githubusercontent.com/ilmimris/wilayah-indonesia-bps/refs/heads/main/data/sql/bps_wilayah_2024_1.2025.sql; \
+    fi
+
 # Build binaries based on DB_TYPE
 RUN if [ "$DB_TYPE" = "postgres" ]; then \
         # Build API binary for PostgreSQL (no CGO needed) \
@@ -51,7 +59,7 @@ WORKDIR /app
 COPY --from=builder /app/regions-api .
 COPY --from=builder /app/regions-ingestor .
 COPY --from=builder /app/migrations ./migrations
-COPY data/ ./data/
+COPY --from=builder /app/data ./data
 
 # Expose port
 EXPOSE 8000
