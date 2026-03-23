@@ -327,7 +327,7 @@ func (r *RegionRepository) buildSearchQuery(params repository.RegionSearchParams
 		// Join WHERE clauses - all ? placeholders will be converted below
 		builder.WriteString(strings.Join(whereClauses, "\n\tOR "))
 	}
-	builder.WriteString("\nORDER BY\n\t(exact_match_boost * 10 + COALESCE(fts_score, 0) + COALESCE(query_similarity_score, 0) + COALESCE(subdistrict_score, 0) + COALESCE(district_score, 0) + COALESCE(city_score, 0) + COALESCE(province_score, 0)) DESC\n")
+	builder.WriteString("\nORDER BY\n\t(exact_match_boost * 100 + COALESCE(fts_score, 0) * 5 + COALESCE(query_similarity_score, 0) + COALESCE(subdistrict_score, 0) * 0.5 + COALESCE(district_score, 0) + COALESCE(city_score, 0) + COALESCE(province_score, 0)) DESC\n")
 
 	// Add limit argument and convert all ? placeholders
 	allArgs = append(allArgs, params.Options.Limit)
