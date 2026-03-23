@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	defaultSearchLimit = 10
+	defaultSearchLimit = 20
 	maxSearchLimit     = 100
 )
 
