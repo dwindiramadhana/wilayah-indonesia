@@ -189,6 +189,17 @@ func (r *RegionRepository) buildSearchQuery(params repository.RegionSearchParams
 		computedColumns = append(computedColumns, "NULL::double precision AS fts_score")
 	}
 
+	// Add similarity matching for main query parameter (fuzzy search)
+	if !queryEmpty {
+		computedColumns = append(computedColumns, `
+			CASE WHEN ? <> '' THEN similarity(full_text, ?)::double precision ELSE NULL::double precision END AS query_similarity_score`)
+		args = append(args, queryTrimmed, queryTrimmed)
+		whereClauses = append(whereClauses, "(? = '' OR query_similarity_score >= 0.1)")
+		whereArgs = append(whereArgs, queryTrimmed)
+	} else {
+		computedColumns = append(computedColumns, "NULL::double precision AS query_similarity_score")
+	}
+
 	subdistrictExpr := "subdistrict"
 	districtExpr := "district"
 	provinceExpr := "province"
@@ -287,7 +298,7 @@ func (r *RegionRepository) buildSearchQuery(params repository.RegionSearchParams
 	addOuter("city_bps_code")
 	addOuter("province_bps")
 	addOuter("province_bps_code")
-	outerColumns = append(outerColumns, "fts_score", "subdistrict_score", "district_score", "city_score", "province_score")
+	outerColumns = append(outerColumns, "fts_score", "query_similarity_score", "subdistrict_score", "district_score", "city_score", "province_score")
 
 	builder.WriteString(strings.Join(outerColumns, ",\n\t"))
 	builder.WriteString("\nFROM scored")
@@ -302,7 +313,7 @@ func (r *RegionRepository) buildSearchQuery(params repository.RegionSearchParams
 		// Join WHERE clauses - all ? placeholders will be converted below
 		builder.WriteString(strings.Join(whereClauses, "\n\tOR "))
 	}
-	builder.WriteString("\nORDER BY\n\t(COALESCE(fts_score, 0) + COALESCE(subdistrict_score, 0) + COALESCE(district_score, 0) + COALESCE(city_score, 0) + COALESCE(province_score, 0)) DESC\n")
+	builder.WriteString("\nORDER BY\n\t(COALESCE(fts_score, 0) + COALESCE(query_similarity_score, 0) + COALESCE(subdistrict_score, 0) + COALESCE(district_score, 0) + COALESCE(city_score, 0) + COALESCE(province_score, 0)) DESC\n")
 
 	// Add limit argument and convert all ? placeholders
 	allArgs = append(allArgs, params.Options.Limit)
