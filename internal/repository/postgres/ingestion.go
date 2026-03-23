@@ -59,6 +59,7 @@ func (uc *IngestionUseCase) Refresh(ctx context.Context, opts ingestionusecase.R
 		description string
 		query       string
 	}{
+		{"create regions table if not exists", createRegionsTableQuery},
 		{"clear regions table", "TRUNCATE regions;"},
 		{"denormalize wilayah dataset", denormalizeQuery},
 		{"update full_text column", "UPDATE regions SET full_text = full_text WHERE id IS NOT NULL;"},
@@ -96,6 +97,30 @@ func (uc *IngestionUseCase) exec(ctx context.Context, description, query string)
 	uc.logger.Info("Step completed", "step", description)
 	return nil
 }
+
+const createRegionsTableQuery = `
+-- Create regions table if it doesn't exist
+CREATE TABLE IF NOT EXISTS regions (
+    id TEXT PRIMARY KEY,
+    subdistrict TEXT NOT NULL,
+    district TEXT NOT NULL,
+    city TEXT NOT NULL,
+    province TEXT NOT NULL,
+    postal_code TEXT,
+    full_text TEXT,
+    full_text_vector TSVECTOR,
+    subdistrict_bps TEXT,
+    subdistrict_bps_code TEXT,
+    district_bps TEXT,
+    district_bps_code TEXT,
+    city_bps TEXT,
+    city_bps_code TEXT,
+    province_bps TEXT,
+    province_bps_code TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+`
 
 const denormalizeQuery = `
 INSERT INTO regions (
