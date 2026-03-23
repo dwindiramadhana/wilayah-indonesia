@@ -34,7 +34,7 @@ services:
     restart: unless-stopped
     environment:
       DB_TYPE: postgres
-      DATABASE_URL: postgres://${POSTGRES_USER:-wilayah_user}:${POSTGRES_PASSWORD}@postgres:5432/wilayah_indonesia?sslmode=disable
+      DATABASE_URL: ${DATABASE_URL}
       PORT: 8000
     depends_on:
       postgres:
